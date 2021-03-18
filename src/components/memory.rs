@@ -1,5 +1,5 @@
 struct Memory {
-    space: [i8; 4096],
+    space: [u8; 4096],
 }
 
 impl Default for Memory {
@@ -11,15 +11,18 @@ impl Default for Memory {
 }
 
 impl Memory {
-    const START: u16 = 0x200;
-    const MAX: u16 = 0xFFF;
+    const START: usize = 0x200;
+    const MAX: usize = 0xFFF;
+    const USABLE_SPACE: usize = Memory::MAX as usize - Memory::START as usize + 1;
     fn write() {}
-    fn load(&self, program: &[u8]) -> Result<&'static str, &'static str> {
-        let pos: u16 = Memory::START;
-        println!("{}", (Memory::MAX - Memory::START + 1) as usize);
-        if program.len() < (Memory::MAX - Memory::START + 1) as usize {
+    fn load(&mut self, program: &[u8]) -> Result<&'static str, &'static str> {
+        let mut pos: usize = Memory::START;
+        // println!("{}", (Memory::MAX - Memory::START + 1) as usize);
+        if program.len() <= Memory::USABLE_SPACE {
             for byte in program {
                 println!("{}", byte);
+                self.space[pos] = byte.clone();
+                pos = pos + 1;
             }
             return Ok("Ok");
         } else {
@@ -36,7 +39,7 @@ mod load {
         let mut mem = Memory {
             ..Default::default()
         };
-        let values: [u8; 0xFFF] = [0; 0xFFF];
+        let values: [u8; 0xFFF] = [1; 0xFFF];
         assert!(mem.load(&values).is_err(), "Failed correctly")
     }
     #[test]
@@ -44,7 +47,10 @@ mod load {
         let mut mem = Memory {
             ..Default::default()
         };
-        let values: [u8; 0xFFF] = [0; 0xFFF];
-        assert!(mem.load(&values).is_err(), "Failed correctly")
+        let values: [u8; Memory::USABLE_SPACE] = [1; Memory::USABLE_SPACE];
+        println!("{}", values.len());
+        let result: Result<&'static str, &'static str> = mem.load(&values);
+        assert_eq!(*mem.space.last().unwrap(), 1 as u8);
+        assert!(!result.is_err(), "Succesfully overwrote the memory")
     }
 }
