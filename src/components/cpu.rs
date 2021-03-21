@@ -132,4 +132,110 @@ impl Cpu {
         [0xF0, 0x80, 0xF0, 0x80, 0xF0], // E Done
         [0xF0, 0x80, 0xF0, 0x80, 0x80], // F Done
     ];
+    // 0nnn - Execute machine language subroutine at nnn
+    // Implemented same as 2nnn in this case
+    fn ml_sub(&mut self, addr: u16) {
+        self.call_sub(addr)
+    }
+    //0E00 - cls()
+    fn cls(&self, state: &mut [[bool; 32]; 64]) {
+        *state = [[false; 32]; 64];
+    }
+    //00EE - Return from subroutine
+    fn ret_sub(&mut self) {
+        let popped_addr = self.stack.pop().unwrap();
+        self.program_counter = popped_addr
+    }
+    //1nnn - Jump to nnn
+    fn jump(&mut self, addr: u16) {
+        self.program_counter = addr - 1;
+    }
+    fn call_sub(&mut self, addr: u16) {
+        self.stack.push(self.program_counter);
+        self.program_counter = addr - 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cpu;
+    mod ops {
+        use super::Cpu;
+        #[test]
+        fn ml_sub() {
+            let mut mem = Cpu {
+                ..Default::default()
+            };
+            let test_addr: u16 = 0x400;
+            mem.ml_sub(test_addr);
+            assert!(mem.stack.len() > 0, "Stack should've been pushed");
+            assert_eq!(
+                mem.program_counter,
+                test_addr - 1,
+                "Address should be set properly"
+            );
+            assert_eq!(
+                mem.stack[0], 0x200,
+                "Check that the original address is in the stack"
+            )
+        }
+        #[test]
+        fn cls() {
+            let mut mem = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[true; 32]; 64];
+            mem.cls(&mut test_state);
+            for item in test_state.iter().flat_map(|sub| sub.iter()) {
+                assert_eq!(*item, false, "Array is not empty in a certain position")
+            }
+        }
+        #[test]
+        fn ret_sub() {
+            let mut mem = Cpu {
+                ..Default::default()
+            };
+            let example_addr1: u16 = 0x400;
+            let example_addr2: u16 = 0x500;
+            mem.stack.push(example_addr2); //Push trash so array is not at 0 all the time
+            mem.stack.push(example_addr1);
+            mem.ret_sub();
+            assert_eq!(
+                mem.program_counter, example_addr1,
+                "Did not pop the correct address the first time"
+            );
+            mem.ret_sub();
+            assert_eq!(
+                mem.program_counter, example_addr2,
+                "Did not pop the correct address the second time"
+            )
+        }
+        #[test]
+        fn jump() {
+            let mut mem = Cpu {
+                ..Default::default()
+            };
+            let example_addr: u16 = 0x400;
+            mem.jump(example_addr);
+            assert_eq!(mem.program_counter, example_addr - 1, "Wrong address set")
+        }
+        #[test]
+        fn call_sub() {
+            let mut mem = Cpu {
+                ..Default::default()
+            };
+            let test_addr: u16 = 0x400;
+            mem.call_sub(test_addr);
+            assert!(mem.stack.len() > 0, "Stack should've been pushed");
+            assert_eq!(
+                mem.program_counter,
+                test_addr - 1,
+                "Address should be set properly"
+            );
+            assert_eq!(
+                mem.stack[0], 0x200,
+                "Check that the original address is in the stack"
+            )
+        }
+    }
 }
