@@ -1,4 +1,4 @@
-struct Cpu {
+pub struct Cpu {
     v: [u8; 16], /* Data registers
                   * The CHIP-8 interpreter has 16 general purpose data registers, V0 to VF
                   * Each is 8 bits in length
@@ -114,7 +114,7 @@ impl Default for Cpu {
 */
 
 impl Cpu {
-    const font: [[u16; 5]; 16] = [
+    pub const FONT: [[u16; 5]; 16] = [
         [0xF0, 0x90, 0x90, 0x90, 0xF0], // 0 Done
         [0x20, 0x60, 0x20, 0x20, 0x70], // 1 Done
         [0xF0, 0x10, 0xF0, 0x80, 0xF0], // 2 Done
