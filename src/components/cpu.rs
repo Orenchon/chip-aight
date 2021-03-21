@@ -137,22 +137,37 @@ impl Cpu {
     fn ml_sub(&mut self, addr: u16) {
         self.call_sub(addr)
     }
-    //0E00 - cls()
+    // 0E00 - cls()
     fn cls(&self, state: &mut [[bool; 32]; 64]) {
         *state = [[false; 32]; 64];
     }
-    //00EE - Return from subroutine
+    // 00EE - Return from subroutine
     fn ret_sub(&mut self) {
         let popped_addr = self.stack.pop().unwrap();
         self.program_counter = popped_addr
     }
-    //1nnn - Jump to nnn
+    // 1nnn - Jump to nnn
     fn jump(&mut self, addr: u16) {
         self.program_counter = addr - 1;
     }
+    // 2nnn - Execute subroutine at nnn
     fn call_sub(&mut self, addr: u16) {
         self.stack.push(self.program_counter);
         self.program_counter = addr - 1
+    }
+    //3xnn - Skip if Vx == nn
+    fn if_reg_equals_nn(&mut self, reg: u8, nn: u8) {
+        let vx = self.v[reg as usize];
+        if vx == nn {
+            self.program_counter = self.program_counter + 1
+        }
+    }
+    //4xnn - Skip if Vx != nn
+    fn if_not_reg_equals_nn(&mut self, reg: u8, nn: u8) {
+        let vx = self.v[reg as usize];
+        if vx != nn {
+            self.program_counter = self.program_counter + 1
+        }
     }
 }
 
@@ -236,6 +251,38 @@ mod tests {
                 mem.stack[0], 0x200,
                 "Check that the original address is in the stack"
             )
+        }
+        #[test]
+        fn if_reg_equals_nn() {
+            let mut mem = Cpu {
+                ..Default::default()
+            };
+            let instruction: u16 = 0x3404;
+            let nn = (instruction & 0xFF) as u8;
+            let reg = ((instruction & 0xF00) >> 8) as u8;
+            mem.v[4] = 4;
+            let expected_pc = mem.program_counter + 1;
+            mem.if_reg_equals_nn(reg, nn);
+            assert_eq!(
+                mem.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
+        }
+        #[test]
+        fn if_not_reg_equals_nn() {
+            let mut mem = Cpu {
+                ..Default::default()
+            };
+            let instruction: u16 = 0x3405;
+            let nn = (instruction & 0xFF) as u8;
+            let reg = ((instruction & 0xF00) >> 8) as u8;
+            mem.v[4] = 4;
+            let expected_pc = mem.program_counter + 1;
+            mem.if_not_reg_equals_nn(reg, nn);
+            assert_eq!(
+                mem.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
         }
     }
 }
