@@ -41,6 +41,7 @@ impl Default for Cpu {
             program_counter: 0x200,
             i: 0,
             dt: 0,
+            st: 0,
         }
     }
 }
@@ -107,7 +108,9 @@ impl Default for Cpu {
 *   Fx18 = st = Vx
 *   Fx1E = I = I + Vx; Unconfirmed: VF = Carry?
 *   Fx29 = I = addr(sprite(Vx)) // Sprite address is internal to the interpreter, it'll have to be placed within 0x000 and 0x1FF
-*   Fx33 = Vx =
+*   Fx33 = [I, I+1, I+2] = bcd(hex(Vx))
+*   Fx55 = [I, I..., I + x] = [V0, V..., Vx]; I = I + x + 1
+*   Fx55 = [V0, V..., Vx] = [I, I..., I + x]; I = I + x + 1
 */
 
 impl Cpu {
@@ -127,6 +130,6 @@ impl Cpu {
         [0xF0, 0x80, 0x80, 0x80, 0xF0], // C Done
         [0xE0, 0x90, 0x90, 0x90, 0xE0], // D Done
         [0xF0, 0x80, 0xF0, 0x80, 0xF0], // E Done
-        [0xF0, 0x80, 0xF0, 0x80, 0x80], // F
+        [0xF0, 0x80, 0xF0, 0x80, 0x80], // F Done
     ];
 }
