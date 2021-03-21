@@ -265,9 +265,23 @@ impl Cpu {
         y: u8,
         n: u8,
         state: &mut [[bool; 32]; 64],
-        mem: memory::Memory,
+        mem: &mut memory::Memory,
     ) {
-        for sprite_row in 0..n {}
+        self.v[0xF] = 0;
+        for sprite_row in 0..n {
+            let row_pos = (self.v[y as usize] + sprite_row) as usize;
+            let sprite_value = (mem.read(self.i + sprite_row as u16).unwrap()) as u8;
+            println!("{}", sprite_value);
+            for sprite_col in 0..8 as u8 {
+                let col_pos = (sprite_col + self.v[x as usize]) as usize;
+                let bit = (sprite_value >> (7 - sprite_col)) & 1;
+                let state_bit = state[col_pos % 64][row_pos % 32] as u8;
+                if bit & state_bit > 0 {
+                    self.v[0xF] = 1
+                }
+                state[col_pos % 64][row_pos % 32] = (bit ^ state_bit) > 0;
+            }
+        }
     }
 }
 
@@ -284,13 +298,13 @@ mod tests {
             };
             Cpu::write_fonts_to_mem(&mut mem);
             for addr in 0x20..(0x20 + 0xF) {
-                println!("{}", addr);
                 let res = mem.read(addr as u16);
                 assert!(res.unwrap() > 0, "Value is not empty");
             }
         }
     }
     mod ops {
+        use super::super::memory::Memory;
         use super::Cpu;
         #[test]
         fn ml_sub() {
@@ -695,5 +709,107 @@ mod tests {
                 "Address should not be anything but 0"
             );
         }*/
+        #[test]
+        fn draw_sprite_no_overflow() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 1;
+            let y: u8 = 2;
+            cpu.v[x as usize] = 1;
+            cpu.v[y as usize] = 3;
+            let n: u8 = 5;
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            cpu.i = 0x20;
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            Cpu::write_fonts_to_mem(&mut mem);
+            cpu.draw_sprite(x, y, n, &mut test_state, &mut mem);
+            /*let mut string: String = "".to_owned();
+            let mut table: Vec<String> = Vec::new();
+            for y in 0..32 as usize {
+                for x in 0..64 as usize {
+                    string = string + &((test_state[x][y] as u8).to_string())[..]
+                }
+                table.push(string.clone());
+                string = "".to_owned();
+            }
+            for row in table {
+                println!("{:?}", row);
+            }*/
+            assert_eq!(test_state[1][3], true, "Top Left Corner should be true");
+            assert_eq!(test_state[4][7], true, "Bottom Right Corner should be true");
+            assert_eq!(cpu.v[0xF], 0, "Overwrite should be 0");
+        }
+        #[test]
+        fn draw_sprite_overflow() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 1;
+            let y: u8 = 2;
+            cpu.v[x as usize] = 62;
+            cpu.v[y as usize] = 30;
+            let n: u8 = 5;
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            cpu.i = 0x20;
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            Cpu::write_fonts_to_mem(&mut mem);
+            cpu.draw_sprite(x, y, n, &mut test_state, &mut mem);
+            /*let mut string: String = "".to_owned();
+            let mut table: Vec<String> = Vec::new();
+            for y in 0..32 as usize {
+                for x in 0..64 as usize {
+                    string = string + &((test_state[x][y] as u8).to_string())[..]
+                }
+                table.push(string.clone());
+                string = "".to_owned();
+            }
+            for row in table {
+                println!("{:?}", row);
+            }*/
+            assert_eq!(test_state[62][30], true, "Top Left Corner should be true");
+            assert_eq!(test_state[1][2], true, "Bottom Right Corner should be true")
+        }
+        #[test]
+        fn draw_sprite_overwrite() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 1;
+            let y: u8 = 2;
+            cpu.v[x as usize] = 1;
+            cpu.v[y as usize] = 3;
+            let n: u8 = 5;
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            cpu.i = 0x20;
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            Cpu::write_fonts_to_mem(&mut mem);
+            cpu.draw_sprite(x, y, n, &mut test_state, &mut mem);
+            cpu.draw_sprite(x, y, n, &mut test_state, &mut mem);
+            /*let mut string: String = "".to_owned();
+            let mut table: Vec<String> = Vec::new();
+            for y in 0..32 as usize {
+                for x in 0..64 as usize {
+                    string = string + &((test_state[x][y] as u8).to_string())[..]
+                }
+                table.push(string.clone());
+                string = "".to_owned();
+            }
+            for row in table {
+                println!("{:?}", row);
+            }*/
+            assert_eq!(test_state[1][3], false, "Top Left Corner should be false");
+            assert_eq!(
+                test_state[4][7], false,
+                "Bottom Right Corner should befalse"
+            );
+            assert_eq!(cpu.v[0xF], 1, "Overwrite should be 1");
+        }
     }
 }
