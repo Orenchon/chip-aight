@@ -1,3 +1,5 @@
+use super::memory;
+use rand::Rng;
 pub struct Cpu {
     v: [u8; 16], /* Data registers
                   * The CHIP-8 interpreter has 16 general purpose data registers, V0 to VF
@@ -31,6 +33,7 @@ pub struct Cpu {
              *  Set by instruction Fx18
              *  Will do nothing if set to 0x01
              */
+    rng: rand::rngs::ThreadRng,
 }
 
 impl Default for Cpu {
@@ -42,6 +45,7 @@ impl Default for Cpu {
             i: 0,
             dt: 0,
             st: 0,
+            rng: rand::thread_rng(),
         }
     }
 }
@@ -99,7 +103,7 @@ impl Default for Cpu {
 *   Annn - I = nnn
 *   Bnnn - Jump to nnn + V0
 *   Cxnn = Vx = Rand() & nn
-*   Dxyn = draw(x: Vx, y: Vy, sprite: sprite(amount_of_data: n, sprite_addr: I)); VF = Pixels unset?
+*   Dxyn = draw(x: Vx, y: Vy, sprite: sprite(sprite_height: n, sprite_addr: I)); VF = Pixels unset?
 *   Ex9E = Skip if key_pressed(hex(Vx)) //keypad is formed by numbers in hex
 *   ExA1 = Skip if !key_pressed(hex(Vx))
 *   Fx07 = Vx = dt
@@ -132,6 +136,11 @@ impl Cpu {
         [0xF0, 0x80, 0xF0, 0x80, 0xF0], // E Done
         [0xF0, 0x80, 0xF0, 0x80, 0x80], // F Done
     ];
+    pub fn write_fonts_to_mem(mem: &mut memory::Memory) {
+        for (idx, sprite) in Cpu::FONT.iter().flatten().enumerate() {
+            let res = mem.write(idx as u16, *sprite);
+        }
+    }
     // 0nnn - Execute machine language subroutine at nnn
     // Implemented same as 2nnn in this case
     fn ml_sub(&mut self, addr: u16) {
@@ -155,19 +164,106 @@ impl Cpu {
         self.stack.push(self.program_counter);
         self.program_counter = addr - 1
     }
-    //3xnn - Skip if Vx == nn
-    fn if_reg_equals_nn(&mut self, reg: u8, nn: u8) {
-        let vx = self.v[reg as usize];
+    // 3xnn - Skip if Vx == nn
+    fn if_reg_equals_nn(&mut self, x: u8, nn: u8) {
+        let vx = self.v[x as usize];
         if vx == nn {
             self.program_counter = self.program_counter + 1
         }
     }
-    //4xnn - Skip if Vx != nn
-    fn if_not_reg_equals_nn(&mut self, reg: u8, nn: u8) {
-        let vx = self.v[reg as usize];
+    // 4xnn - Skip if Vx != nn
+    fn if_not_reg_equals_nn(&mut self, x: u8, nn: u8) {
+        let vx = self.v[x as usize];
         if vx != nn {
             self.program_counter = self.program_counter + 1
         }
+    }
+    // 5xy0 - Skip if Vx == Vy
+    fn if_reg_equals_reg(&mut self, x: u8, y: u8) {
+        if self.v[x as usize] == self.v[y as usize] {
+            self.program_counter = self.program_counter + 1
+        }
+    }
+    // 6xnn - Vx = nn
+    fn reg_store_nn(&mut self, x: u8, nn: u8) {
+        self.v[x as usize] = nn
+    }
+    // 7xnn - Vx = Vx + nn; CHECK OVERFLOW BEHAVIOR
+    fn reg_add_nn(&mut self, x: u8, nn: u8) {
+        self.v[x as usize] = self.v[x as usize] + nn
+    }
+    // 8xy0 - Vx = Vy
+    fn assign_reg_to_reg(&mut self, x: u8, y: u8) {
+        self.v[x as usize] = self.v[y as usize]
+    }
+    // 8xy1 - Vx = Vx | Vy
+    fn reg_or_reg(&mut self, x: u8, y: u8) {
+        self.v[x as usize] = self.v[x as usize] | self.v[y as usize]
+    }
+    // 8xy2 - Vx = Vx & Vy
+    fn reg_and_reg(&mut self, x: u8, y: u8) {
+        self.v[x as usize] = self.v[x as usize] & self.v[y as usize]
+    }
+    // 8xy3 - Vx = Vx ^ Vy
+    fn reg_xor_reg(&mut self, x: u8, y: u8) {
+        self.v[x as usize] = self.v[x as usize] ^ self.v[y as usize]
+    }
+    // 8xy4 - Vx = Vx + Vy; VF = Carry?
+    fn reg_plus_reg(&mut self, x: u8, y: u8) {
+        let result = self.v[x as usize].overflowing_add(self.v[y as usize]);
+        self.v[x as usize] = result.0;
+        self.v[0xF] = result.1 as u8;
+    }
+    // 8xy5 - Vx = Vx - Vy; VF = 0 if borrow else 1
+    fn reg_minus_reg(&mut self, x: u8, y: u8) {
+        let result = self.v[x as usize].overflowing_sub(self.v[y as usize]);
+        self.v[x as usize] = result.0;
+        self.v[0xF] = (!result.1) as u8;
+    }
+    // 8xy6 - Vx = Vy >> 1; VF = Vy & 1
+    fn reg_shift_right(&mut self, x: u8) {
+        self.v[0xF] = self.v[x as usize] & 1;
+        self.v[x as usize] = self.v[x as usize] >> 1;
+    }
+    // 8xy7 - Vx = Vy - Vx; VF = Borrow?
+    fn reverse_reg_minus_reg(&mut self, x: u8, y: u8) {
+        let result = self.v[y as usize].overflowing_sub(self.v[x as usize]);
+        self.v[x as usize] = result.0;
+        self.v[0xF] = (!result.1) as u8;
+    }
+    // 8xyE - Vx = Vy << 1; VF = Vy >> 7
+    fn reg_shift_left(&mut self, x: u8) {
+        self.v[0xF] = self.v[x as usize] >> 7;
+        self.v[x as usize] = self.v[x as usize] << 1;
+    }
+    // 9xy0 - Skip if Vx != Vy
+    fn if_not_reg_equals_reg(&mut self, x: u8, y: u8) {
+        if self.v[x as usize] != self.v[y as usize] {
+            self.program_counter = self.program_counter + 1
+        }
+    }
+    // Annn - I = nnn
+    fn store_addr(&mut self, nnn: u16) {
+        self.i = nnn;
+    }
+    // Bnnn - Jump to nnn + V0
+    fn reg_plus_nnn_jump(&mut self, nnn: u16) {
+        self.program_counter = self.v[0] as u16 + nnn - 1
+    }
+    // Cxnn = Vx = Rand() & nn
+    fn random(&mut self, x: u8, nn: u8) {
+        self.v[x as usize] = self.rng.gen::<u8>() & nn;
+    }
+    // Dxyn = draw(x: Vx, y: Vy, sprite: sprite(sprite_height: n, sprite_addr: I)); VF = Pixels unset?
+    fn draw_sprite(
+        &mut self,
+        x: u8,
+        y: u8,
+        n: u8,
+        state: &mut [[bool; 32]; 64],
+        mem: memory::Memory,
+    ) {
+        for sprite_row in 0..n {}
     }
 }
 
@@ -178,111 +274,406 @@ mod tests {
         use super::Cpu;
         #[test]
         fn ml_sub() {
-            let mut mem = Cpu {
+            let mut cpu = Cpu {
                 ..Default::default()
             };
             let test_addr: u16 = 0x400;
-            mem.ml_sub(test_addr);
-            assert!(mem.stack.len() > 0, "Stack should've been pushed");
+            cpu.ml_sub(test_addr);
+            assert!(cpu.stack.len() > 0, "Stack should've been pushed");
             assert_eq!(
-                mem.program_counter,
+                cpu.program_counter,
                 test_addr - 1,
                 "Address should be set properly"
             );
             assert_eq!(
-                mem.stack[0], 0x200,
+                cpu.stack[0], 0x200,
                 "Check that the original address is in the stack"
             )
         }
         #[test]
         fn cls() {
-            let mut mem = Cpu {
+            let mut cpu = Cpu {
                 ..Default::default()
             };
             let mut test_state: [[bool; 32]; 64] = [[true; 32]; 64];
-            mem.cls(&mut test_state);
+            cpu.cls(&mut test_state);
             for item in test_state.iter().flat_map(|sub| sub.iter()) {
                 assert_eq!(*item, false, "Array is not empty in a certain position")
             }
         }
         #[test]
         fn ret_sub() {
-            let mut mem = Cpu {
+            let mut cpu = Cpu {
                 ..Default::default()
             };
             let example_addr1: u16 = 0x400;
             let example_addr2: u16 = 0x500;
-            mem.stack.push(example_addr2); //Push trash so array is not at 0 all the time
-            mem.stack.push(example_addr1);
-            mem.ret_sub();
+            cpu.stack.push(example_addr2); //Push trash so array is not at 0 all the time
+            cpu.stack.push(example_addr1);
+            cpu.ret_sub();
             assert_eq!(
-                mem.program_counter, example_addr1,
+                cpu.program_counter, example_addr1,
                 "Did not pop the correct address the first time"
             );
-            mem.ret_sub();
+            cpu.ret_sub();
             assert_eq!(
-                mem.program_counter, example_addr2,
+                cpu.program_counter, example_addr2,
                 "Did not pop the correct address the second time"
             )
         }
         #[test]
         fn jump() {
-            let mut mem = Cpu {
+            let mut cpu = Cpu {
                 ..Default::default()
             };
             let example_addr: u16 = 0x400;
-            mem.jump(example_addr);
-            assert_eq!(mem.program_counter, example_addr - 1, "Wrong address set")
+            cpu.jump(example_addr);
+            assert_eq!(cpu.program_counter, example_addr - 1, "Wrong address set")
         }
         #[test]
         fn call_sub() {
-            let mut mem = Cpu {
+            let mut cpu = Cpu {
                 ..Default::default()
             };
             let test_addr: u16 = 0x400;
-            mem.call_sub(test_addr);
-            assert!(mem.stack.len() > 0, "Stack should've been pushed");
+            cpu.call_sub(test_addr);
+            assert!(cpu.stack.len() > 0, "Stack should've been pushed");
             assert_eq!(
-                mem.program_counter,
+                cpu.program_counter,
                 test_addr - 1,
                 "Address should be set properly"
             );
             assert_eq!(
-                mem.stack[0], 0x200,
+                cpu.stack[0], 0x200,
                 "Check that the original address is in the stack"
             )
         }
         #[test]
         fn if_reg_equals_nn() {
-            let mut mem = Cpu {
+            let mut cpu = Cpu {
                 ..Default::default()
             };
             let instruction: u16 = 0x3404;
             let nn = (instruction & 0xFF) as u8;
             let reg = ((instruction & 0xF00) >> 8) as u8;
-            mem.v[4] = 4;
-            let expected_pc = mem.program_counter + 1;
-            mem.if_reg_equals_nn(reg, nn);
+            cpu.v[4] = 4;
+            let expected_pc = cpu.program_counter + 1;
+            cpu.if_reg_equals_nn(reg, nn);
             assert_eq!(
-                mem.program_counter, expected_pc,
+                cpu.program_counter, expected_pc,
                 "Address should be incremented properly"
             );
         }
         #[test]
         fn if_not_reg_equals_nn() {
-            let mut mem = Cpu {
+            let mut cpu = Cpu {
                 ..Default::default()
             };
-            let instruction: u16 = 0x3405;
+            let instruction: u16 = 0x4405;
             let nn = (instruction & 0xFF) as u8;
             let reg = ((instruction & 0xF00) >> 8) as u8;
-            mem.v[4] = 4;
-            let expected_pc = mem.program_counter + 1;
-            mem.if_not_reg_equals_nn(reg, nn);
+            cpu.v[4] = 4;
+            let expected_pc = cpu.program_counter + 1;
+            cpu.if_not_reg_equals_nn(reg, nn);
             assert_eq!(
-                mem.program_counter, expected_pc,
+                cpu.program_counter, expected_pc,
                 "Address should be incremented properly"
             );
         }
+        #[test]
+        fn if_reg_equals_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let instruction: u16 = 0x5450;
+            let y = ((instruction & 0xF0) >> 4) as u8;
+            let x = ((instruction & 0xF00) >> 8) as u8;
+            cpu.v[4] = 4;
+            cpu.v[5] = 4;
+            let expected_pc = cpu.program_counter + 1;
+            cpu.if_reg_equals_reg(x, y);
+            assert_eq!(
+                cpu.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
+        }
+        #[test]
+        fn reg_store_nn() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            let nn: u8 = 10;
+            cpu.reg_store_nn(x, nn);
+            assert_eq!(
+                cpu.v[x as usize], nn,
+                "Register should be assigned properly"
+            );
+        }
+        #[test]
+        fn reg_add_nn() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 3;
+            let nn: u8 = 10;
+            cpu.reg_add_nn(x, nn);
+            assert_eq!(
+                cpu.v[x as usize],
+                nn + 3,
+                "Register should be assigned properly"
+            );
+        }
+        #[test]
+        fn assign_reg_to_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 3;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 10;
+            cpu.assign_reg_to_reg(x, y);
+            assert_eq!(
+                cpu.v[x as usize], 10,
+                "Register should be assigned properly"
+            );
+        }
+        #[test]
+        fn reg_or_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 0xF0;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 0xF;
+            cpu.reg_or_reg(x, y);
+            assert_eq!(
+                cpu.v[x as usize], 0xFF,
+                "Register should be assigned properly"
+            );
+        }
+        #[test]
+        fn reg_and_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 0xF0;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 0xF0;
+            cpu.reg_and_reg(x, y);
+            assert_eq!(
+                cpu.v[x as usize], 0xF0,
+                "Register should be assigned properly"
+            );
+        }
+        #[test]
+        fn reg_xor_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 0b0110;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 0b1100;
+            cpu.reg_xor_reg(x, y);
+            assert_eq!(
+                cpu.v[x as usize], 0b1010,
+                "Register should be assigned properly"
+            );
+        }
+        #[test]
+        fn reg_plus_reg_normal() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 0b0010;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 0b0010;
+            cpu.reg_plus_reg(x, y);
+            assert_eq!(
+                cpu.v[x as usize], 0b0100,
+                "Register should be assigned properly"
+            );
+            assert_eq!(cpu.v[0xF], 0, "Carry should be 0");
+        }
+        #[test]
+        fn reg_plus_reg_carry() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 128;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 128;
+            cpu.reg_plus_reg(x, y);
+            assert_eq!(cpu.v[x as usize], 0, "Register should be assigned properly");
+            assert_eq!(cpu.v[0xF], 1, "Carry should be 1");
+        }
+        #[test]
+        fn reg_minus_reg_normal() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 10;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 5;
+            cpu.reg_minus_reg(x, y);
+            assert_eq!(cpu.v[x as usize], 5, "Register should be assigned properly");
+            assert_eq!(cpu.v[0xF], 1, "Borrow should be 1");
+        }
+        #[test]
+        fn reg_minus_reg_borrow() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 5;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 10;
+            cpu.reg_minus_reg(x, y);
+            assert_eq!(
+                cpu.v[x as usize], 251,
+                "Register should be assigned properly"
+            );
+            assert_eq!(cpu.v[0xF], 0, "Borrow should be 0");
+        }
+        #[test]
+        fn reg_shift_right_normal() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 10;
+            cpu.reg_shift_right(x);
+            assert_eq!(cpu.v[x as usize], 5, "Register should be assigned properly");
+            assert_eq!(cpu.v[0xF], 0, "Overflow should be 0");
+        }
+        #[test]
+        fn reg_shift_right_overflow() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 5;
+            cpu.reg_shift_right(x);
+            assert_eq!(cpu.v[x as usize], 2, "Register should be assigned properly");
+            assert_eq!(cpu.v[0xF], 1, "Overflow should be 1");
+        }
+        #[test]
+        fn reverse_reg_minus_reg_normal() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 5;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 10;
+            cpu.reverse_reg_minus_reg(x, y);
+            assert_eq!(cpu.v[x as usize], 5, "Register should be assigned properly");
+            assert_eq!(cpu.v[0xF], 1, "Borrow should be 1");
+        }
+        #[test]
+        fn reverse_reg_minus_reg_borrow() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 10;
+            let y: u8 = 5;
+            cpu.v[y as usize] = 5;
+            cpu.reverse_reg_minus_reg(x, y);
+            assert_eq!(
+                cpu.v[x as usize], 251,
+                "Register should be assigned properly"
+            );
+            assert_eq!(cpu.v[0xF], 0, "Borrow should be 0");
+        }
+        #[test]
+        fn reg_shift_left_normal() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 0x0F;
+            cpu.reg_shift_left(x);
+            assert_eq!(
+                cpu.v[x as usize], 30,
+                "Register should be assigned properly"
+            );
+            assert_eq!(cpu.v[0xF], 0, "Overflow should be 0");
+        }
+        #[test]
+        fn reg_shift_left_overflow() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 4;
+            cpu.v[x as usize] = 0xF0;
+            cpu.reg_shift_left(x);
+            assert_eq!(
+                cpu.v[x as usize], 224,
+                "Register should be assigned properly"
+            );
+            assert_eq!(cpu.v[0xF], 1, "Overflow should be 1");
+        }
+        #[test]
+        fn if_not_reg_equals_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let instruction: u16 = 0x5450;
+            let y = ((instruction & 0xF0) >> 4) as u8;
+            let x = ((instruction & 0xF00) >> 8) as u8;
+            cpu.v[4] = 4;
+            cpu.v[5] = 5;
+            let expected_pc = cpu.program_counter + 1;
+            cpu.if_not_reg_equals_reg(x, y);
+            assert_eq!(
+                cpu.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
+        }
+        #[test]
+        fn store_addr() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let nnn: u16 = 0xF0;
+            cpu.store_addr(nnn);
+            assert_eq!(cpu.i, nnn, "Address should be incremented properly");
+        }
+        #[test]
+        fn reg_plus_nnn_jump() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let nnn: u16 = 0xF0;
+            cpu.v[0] = 4;
+            cpu.reg_plus_nnn_jump(nnn);
+            assert_eq!(
+                cpu.program_counter + 1,
+                nnn + 4,
+                "Address should be changed"
+            );
+        }
+        /*#[test] Not run because i can't guarantee it doesn't hit 0 occasionallly
+        fn random() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let nn: u8 = 0x01;
+            let x: u8 = 0x4;
+            cpu.random(x, nn);
+            assert!(
+                cpu.v[x as usize] != 0,
+                "Address should not be anything but 0"
+            );
+        }*/
     }
 }
