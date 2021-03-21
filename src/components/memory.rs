@@ -1,5 +1,5 @@
-struct Memory {
-    space: [u8; Memory::BYTE_MAX],
+pub struct Memory {
+    pub space: [u8; Memory::BYTE_MAX],
 }
 
 impl Default for Memory {
@@ -15,7 +15,7 @@ impl Memory {
     const MAX: u16 = 0xFFF;
     const BYTE_MAX: usize = 8192; // The biggest memory size used with the CHIP-8 is 8k on the COSMAC VIP
     const USABLE_SPACE: usize = (Memory::MAX as usize - Memory::START as usize + 1) * 2;
-    fn write(&mut self, pos: u16, data: u16) -> Result<&'static str, &'static str> {
+    pub fn write(&mut self, pos: u16, data: u16) -> Result<&'static str, &'static str> {
         let pos_u: usize = (pos * 2) as usize;
         if pos >= Memory::START && pos <= Memory::MAX {
             let data_head: u8 = (data >> 8) as u8;
@@ -27,7 +27,19 @@ impl Memory {
             return Err("Out of bounds exception");
         }
     }
-    fn read(&mut self, pos: u16) -> Result<u16, &'static str> {
+    pub fn unbound_write(&mut self, pos: u16, data: u16) -> Result<&'static str, &'static str> {
+        let pos_u: usize = (pos * 2) as usize;
+        if pos <= Memory::MAX {
+            let data_head: u8 = (data >> 8) as u8;
+            let data_tail: u8 = (data & 0xFF) as u8;
+            self.space[pos_u] = data_head;
+            self.space[pos_u + 1] = data_tail;
+            return Ok("Ok");
+        } else {
+            return Err("Out of bounds exception");
+        }
+    }
+    pub fn read(&mut self, pos: u16) -> Result<u16, &'static str> {
         let pos_u: usize = (pos * 2) as usize;
         if pos <= Memory::MAX {
             let data_head: u16 = ((self.space[pos_u]) as u16) << 8;
@@ -37,7 +49,7 @@ impl Memory {
             return Err("Out of bounds exception");
         }
     }
-    fn load(&mut self, program: &[u8]) -> Result<&'static str, &'static str> {
+    pub fn load(&mut self, program: &[u8]) -> Result<&'static str, &'static str> {
         let mut pos: usize = (Memory::START * 2) as usize;
         if program.len() <= Memory::USABLE_SPACE {
             for byte in program {

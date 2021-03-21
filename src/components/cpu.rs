@@ -138,7 +138,11 @@ impl Cpu {
     ];
     pub fn write_fonts_to_mem(mem: &mut memory::Memory) {
         for (idx, sprite) in Cpu::FONT.iter().flatten().enumerate() {
-            let res = mem.write(idx as u16, *sprite);
+            let res = mem.unbound_write((idx + 0x20) as u16, *sprite);
+            match res {
+                Err(err) => panic!("{}", err),
+                _ => (),
+            }
         }
     }
     // 0nnn - Execute machine language subroutine at nnn
@@ -270,6 +274,22 @@ impl Cpu {
 #[cfg(test)]
 mod tests {
     use super::Cpu;
+    mod fonts {
+        use super::super::memory::Memory;
+        use super::Cpu;
+        #[test]
+        fn load_fonts() {
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            Cpu::write_fonts_to_mem(&mut mem);
+            for addr in 0x20..(0x20 + 0xF) {
+                println!("{}", addr);
+                let res = mem.read(addr as u16);
+                assert!(res.unwrap() > 0, "Value is not empty");
+            }
+        }
+    }
     mod ops {
         use super::Cpu;
         #[test]
