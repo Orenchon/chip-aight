@@ -1,5 +1,6 @@
 mod components;
 use components::cpu::Cpu;
+use components::sound::SoundManager;
 use pixels::{Error, Pixels, SurfaceTexture};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -45,6 +46,8 @@ fn main() {
     let mut state: [[bool; 32]; 64] = [[false; 32]; 64];
     let mut pixels = Pixels::new(64, 32, surface_texture).unwrap();
     let mut last_draw = Instant::now();
+    let mut sound_system = SoundManager::new().unwrap();
+    //sound_system.play();
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,
@@ -65,7 +68,7 @@ fn main() {
                 match key_pressed {
                     Some(key) => {
                         //println!("{:?}", state);
-                        is_key_pressed[key] = true
+                        is_key_pressed[key] = true;
                     }
                     _ => (),
                 }
@@ -83,7 +86,7 @@ fn main() {
                 match key_pressed {
                     Some(key) => {
                         //println!("{:?}", state);
-                        is_key_pressed[key] = false
+                        is_key_pressed[key] = false;
                     }
                     _ => (),
                 }
