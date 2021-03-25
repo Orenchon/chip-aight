@@ -143,6 +143,7 @@ impl Default for Cpu {
 */
 
 impl Cpu {
+    /// Each subarray is a different number, from 0x0 to 0xF
     pub const FONT: [[u16; 5]; 16] = [
         [0xF0, 0x90, 0x90, 0x90, 0xF0], // 0 Done
         [0x20, 0x60, 0x20, 0x20, 0x70], // 1 Done
@@ -1032,6 +1033,26 @@ mod tests {
                 cpu.is_key_pressed_temp, None,
                 "Temp is_key_pressed should be empty"
             );
+        }
+        #[test]
+        fn dt_from_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x = 0x3;
+            cpu.v[x as usize] = 10;
+            cpu.dt_from_reg(x);
+            assert_eq!(cpu.dt, 10, "Address should be incremented properly");
+        }
+        #[test]
+        fn st_from_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x = 0x3;
+            cpu.v[x as usize] = 10;
+            cpu.st_from_reg(x);
+            assert_eq!(cpu.st, 10, "Address should be incremented properly");
         }
     }
 }
