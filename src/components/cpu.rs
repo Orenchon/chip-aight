@@ -139,7 +139,7 @@ impl Default for Cpu {
 *   Fx29 = I = addr(sprite(Vx)) // Sprite address is internal to the interpreter, it'll have to be placed within 0x000 and 0x1FF
 *   Fx33 = [I, I+1, I+2] = bcd(hex(Vx))
 *   Fx55 = [I, I..., I + x] = [V0, V..., Vx]; I = I + x + 1
-*   Fx55 = [V0, V..., Vx] = [I, I..., I + x]; I = I + x + 1
+*   Fx65 = [V0, V..., Vx] = [I, I..., I + x]; I = I + x + 1
 */
 
 impl Cpu {
