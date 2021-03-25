@@ -34,6 +34,7 @@ pub struct Cpu {
              *  Will do nothing if set to 0x01
              */
     rng: rand::rngs::ThreadRng,
+    is_key_pressed_temp: Option<[bool; 16]>,
 }
 
 impl Default for Cpu {
@@ -46,6 +47,7 @@ impl Default for Cpu {
             dt: 0,
             st: 0,
             rng: rand::thread_rng(),
+            is_key_pressed_temp: None,
         }
     }
 }
@@ -281,6 +283,45 @@ impl Cpu {
                 }
                 state[col_pos % 64][row_pos % 32] = (bit ^ state_bit) > 0;
             }
+        }
+    }
+    // Ex9E = Skip if key_pressed(hex(Vx)) //keypad is formed by numbers in hex
+    fn if_key_pressed(&mut self, keys_pressed: &[bool; 16], x: u8) {
+        if keys_pressed[self.v[x as usize] as usize] {
+            self.program_counter = self.program_counter + 1
+        }
+    }
+    // ExA1 = Skip if !key_pressed(hex(Vx))
+    fn if_not_key_pressed(&mut self, keys_pressed: &[bool; 16], x: u8) {
+        if !keys_pressed[self.v[x as usize] as usize] {
+            self.program_counter = self.program_counter + 1
+        }
+    }
+    // Fx07 = Vx = dt
+    fn store_dt(&mut self, x: u8) {
+        self.v[x as usize] = self.dt
+    }
+    // Fx0A = Vx = block_until_keypress()
+    fn wait_for_keypress(&mut self, x: u8, keys_pressed: &[bool; 16]) {
+        match self.is_key_pressed_temp {
+            Some(is_key_pressed_og) => {
+                let mut modded = false; // We must not continue if not key press/release
+                for (idx, key) in keys_pressed.iter().enumerate() {
+                    if is_key_pressed_og[idx] != *key {
+                        self.v[x as usize] = idx as u8;
+                        modded = true;
+                        self.is_key_pressed_temp = None; //Once the modification's been done correctly, we clean up for the next Fx0A
+                        break;
+                    }
+                }
+                if !modded {
+                    self.program_counter = self.program_counter - 1
+                }
+            }
+            None => {
+                self.is_key_pressed_temp = Some(keys_pressed.clone());
+                self.program_counter = self.program_counter - 1
+            } //Store state before wait
         }
     }
 }
@@ -810,6 +851,146 @@ mod tests {
                 "Bottom Right Corner should befalse"
             );
             assert_eq!(cpu.v[0xF], 1, "Overwrite should be 1");
+        }
+        #[test]
+        fn if_key_pressed_true() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x = 0x3;
+            cpu.v[x as usize] = 0x3;
+            let mut is_key_pressed: [bool; 16] = [false; 16];
+            is_key_pressed[x as usize] = true;
+            let expected_pc = cpu.program_counter + 1;
+            cpu.if_key_pressed(&is_key_pressed, x);
+            assert_eq!(
+                cpu.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
+        }
+        #[test]
+        fn if_key_pressed_false() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x = 0x3;
+            cpu.v[x as usize] = 0x3;
+            let mut is_key_pressed: [bool; 16] = [false; 16];
+            is_key_pressed[x as usize] = false;
+            let expected_pc = cpu.program_counter;
+            cpu.if_key_pressed(&is_key_pressed, x);
+            assert_eq!(
+                cpu.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
+        }
+        #[test]
+        fn if_not_key_pressed_true() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x = 0x3;
+            cpu.v[x as usize] = 0x3;
+            let mut is_key_pressed: [bool; 16] = [false; 16];
+            is_key_pressed[x as usize] = false;
+            let expected_pc = cpu.program_counter + 1;
+            cpu.if_not_key_pressed(&is_key_pressed, x);
+            assert_eq!(
+                cpu.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
+        }
+        #[test]
+        fn if_not_key_pressed_false() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x = 0x3;
+            cpu.v[x as usize] = 0x3;
+            let mut is_key_pressed: [bool; 16] = [false; 16];
+            is_key_pressed[x as usize] = true;
+            let expected_pc = cpu.program_counter;
+            cpu.if_not_key_pressed(&is_key_pressed, x);
+            assert_eq!(
+                cpu.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
+        }
+        #[test]
+        fn store_dt() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x = 0x3;
+            cpu.dt = 20;
+            cpu.store_dt(x);
+            assert_eq!(
+                cpu.v[x as usize], 20,
+                "Address should be incremented properly"
+            );
+        }
+        #[test]
+        fn wait_for_keypress_press() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 0x3;
+            let mut is_key_pressed: [bool; 16] = [false; 16];
+            let expected_pc = cpu.program_counter + 1;
+            cpu.wait_for_keypress(x, &is_key_pressed);
+            cpu.program_counter = cpu.program_counter + 1;
+            cpu.wait_for_keypress(x, &is_key_pressed);
+            cpu.program_counter = cpu.program_counter + 1;
+            cpu.wait_for_keypress(x, &is_key_pressed);
+            cpu.program_counter = cpu.program_counter + 1;
+            assert_eq!(
+                cpu.program_counter,
+                expected_pc - 1,
+                "Address shouldn't be incremented yet"
+            );
+            is_key_pressed[0xE] = true;
+            cpu.wait_for_keypress(x, &is_key_pressed);
+            cpu.program_counter = cpu.program_counter + 1;
+            assert_eq!(
+                cpu.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
+            assert_eq!(
+                cpu.v[x as usize], 0xE,
+                "Register should have the pressed key saved"
+            );
+        }
+        #[test]
+        fn wait_for_keypress_release() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x: u8 = 0x3;
+            let mut is_key_pressed: [bool; 16] = [false; 16];
+            is_key_pressed[0xE] = true;
+            let expected_pc = cpu.program_counter + 1;
+            cpu.wait_for_keypress(x, &is_key_pressed);
+            cpu.program_counter = cpu.program_counter + 1;
+            cpu.wait_for_keypress(x, &is_key_pressed);
+            cpu.program_counter = cpu.program_counter + 1;
+            cpu.wait_for_keypress(x, &is_key_pressed);
+            cpu.program_counter = cpu.program_counter + 1;
+            assert_eq!(
+                cpu.program_counter,
+                expected_pc - 1,
+                "Address shouldn't be incremented yet"
+            );
+            is_key_pressed[0xE] = false;
+            cpu.wait_for_keypress(x, &is_key_pressed);
+            cpu.program_counter = cpu.program_counter + 1;
+            assert_eq!(
+                cpu.program_counter, expected_pc,
+                "Address should be incremented properly"
+            );
+            assert_eq!(
+                cpu.v[x as usize], 0xE,
+                "Register should have the released key saved"
+            );
         }
     }
 }
