@@ -992,6 +992,10 @@ mod tests {
                 cpu.v[x as usize], 0xE,
                 "Register should have the pressed key saved"
             );
+            assert_eq!(
+                cpu.is_key_pressed_temp, None,
+                "Temp is_key_pressed should be empty"
+            );
         }
         #[test]
         fn wait_for_keypress_release() {
@@ -1023,6 +1027,10 @@ mod tests {
             assert_eq!(
                 cpu.v[x as usize], 0xE,
                 "Register should have the released key saved"
+            );
+            assert_eq!(
+                cpu.is_key_pressed_temp, None,
+                "Temp is_key_pressed should be empty"
             );
         }
     }
