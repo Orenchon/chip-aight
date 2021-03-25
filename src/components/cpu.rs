@@ -299,7 +299,7 @@ impl Cpu {
         for sprite_row in 0..n {
             let row_pos = (self.v[y as usize] + sprite_row) as usize;
             let sprite_value = (mem.read(self.i + sprite_row as u16).unwrap()) as u8;
-            println!("{}", sprite_value);
+            //println!("{}", sprite_value);
             for sprite_col in 0..8 as u8 {
                 let col_pos = (sprite_col + self.v[x as usize]) as usize;
                 let bit = (sprite_value >> (7 - sprite_col)) & 1;
@@ -357,6 +357,33 @@ impl Cpu {
     /// Fx18 = st = Vx
     fn st_from_reg(&mut self, x: u8) {
         self.st = self.v[x as usize]
+    }
+    /// Fx1E = I = I + Vx; Unconfirmed: VF = Carry?
+    fn add_reg_to_i(&mut self, x: u8) {
+        self.i = self.i + self.v[x as usize] as u16
+    }
+    /// Fx29 = I = addr(sprite(Vx))
+    ///
+    /// Sprite address is internal to the interpreter, it'll have to be placed within 0x000 and 0x1FF
+    fn get_sprite_address(&mut self, x: u8) {
+        self.i = (0x20 + (self.v[x as usize] * 5)) as u16
+    }
+    /// Fx33 = [I, I+1, I+2] = bcd(hex(Vx))
+    fn get_bcd(&mut self, x: u8, mem: &mut memory::Memory) {
+        let mut number = self.v[x as usize];
+        let mut stack_of_digits: Vec<u8> = Vec::new();
+        while number > 0 {
+            stack_of_digits.push(number % 10);
+            //println!("{}", number % 10);
+            number = number / 10;
+        }
+        while stack_of_digits.len() < 3 {
+            stack_of_digits.push(0);
+        }
+        stack_of_digits.reverse();
+        for (idx, digit) in stack_of_digits.iter().enumerate() {
+            mem.write(self.i + idx as u16, *digit as u16).unwrap();
+        }
     }
 }
 
@@ -1042,7 +1069,7 @@ mod tests {
             let x = 0x3;
             cpu.v[x as usize] = 10;
             cpu.dt_from_reg(x);
-            assert_eq!(cpu.dt, 10, "Address should be incremented properly");
+            assert_eq!(cpu.dt, 10, "Delay timer should be set properly");
         }
         #[test]
         fn st_from_reg() {
@@ -1052,7 +1079,50 @@ mod tests {
             let x = 0x3;
             cpu.v[x as usize] = 10;
             cpu.st_from_reg(x);
-            assert_eq!(cpu.st, 10, "Address should be incremented properly");
+            assert_eq!(cpu.st, 10, "Sound timer should be set properly");
+        }
+        #[test]
+        fn add_reg_to_i() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x = 0x3;
+            cpu.v[x as usize] = 10;
+            cpu.i = 10;
+            cpu.add_reg_to_i(x);
+            assert_eq!(cpu.i, 20, "I should be incremented properly");
+        }
+        #[test]
+        fn get_sprite_address() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let x = 0x3;
+            cpu.v[x as usize] = 1;
+            cpu.i = 0;
+            cpu.get_sprite_address(x);
+            assert_eq!(cpu.i, 0x25, "I should be set properly to 0x25");
+            cpu.v[x as usize] = 0;
+            cpu.i = 0;
+            cpu.get_sprite_address(x);
+            assert_eq!(cpu.i, 0x20, "I should be set properly to 0x20");
+        }
+        #[test]
+        fn get_bcd() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            Cpu::write_fonts_to_mem(&mut mem);
+            let x = 0x3;
+            cpu.v[x as usize] = 123;
+            cpu.i = 0x400;
+            cpu.get_bcd(x, &mut mem);
+            assert_eq!(mem.read(cpu.i).unwrap(), 1, "I should be 1");
+            assert_eq!(mem.read(cpu.i + 1).unwrap(), 2, "I + 1 should be 2");
+            assert_eq!(mem.read(cpu.i + 2).unwrap(), 3, "I + 2 should be 3");
         }
     }
 }
