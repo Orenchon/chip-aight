@@ -385,6 +385,22 @@ impl Cpu {
             mem.write(self.i + idx as u16, *digit as u16).unwrap();
         }
     }
+    /// Fx55 = [I, I..., I + x] = [V0, V..., Vx]; I = I + x + 1
+    fn store_regs(&mut self, x: u8, mem: &mut memory::Memory) {
+        for reg in 0..=x {
+            let reg_addr = self.i + reg as u16;
+            mem.write(reg_addr, self.v[reg as usize] as u16).unwrap();
+        }
+        self.i = self.i + x as u16 + 1
+    }
+    /// Fx65 = [V0, V..., Vx] = [I, I..., I + x]; I = I + x + 1
+    fn load_regs(&mut self, x: u8, mem: &mut memory::Memory) {
+        for reg in 0..=x {
+            let reg_addr = self.i + reg as u16;
+            self.v[reg as usize] = mem.read(reg_addr).unwrap() as u8;
+        }
+        self.i = self.i + x as u16 + 1
+    }
 }
 
 #[cfg(test)]
@@ -1123,6 +1139,64 @@ mod tests {
             assert_eq!(mem.read(cpu.i).unwrap(), 1, "I should be 1");
             assert_eq!(mem.read(cpu.i + 1).unwrap(), 2, "I + 1 should be 2");
             assert_eq!(mem.read(cpu.i + 2).unwrap(), 3, "I + 2 should be 3");
+        }
+        #[test]
+        fn store_regs() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            Cpu::write_fonts_to_mem(&mut mem);
+            let x = 0x3;
+            cpu.v[0] = 1;
+            cpu.v[1] = 2;
+            cpu.v[2] = 3;
+            cpu.v[x as usize] = 4;
+            cpu.i = 0x400;
+            let original_i = 0x400;
+            cpu.store_regs(x, &mut mem);
+            assert_eq!(mem.read(original_i).unwrap(), 1, "I should be 1");
+            assert_eq!(mem.read(original_i + 1).unwrap(), 2, "I + 1 should be 2");
+            assert_eq!(mem.read(original_i + 2).unwrap(), 3, "I + 2 should be 3");
+            assert_eq!(
+                mem.read(original_i + x as u16).unwrap(),
+                4,
+                "I + x should be 3"
+            );
+            assert_eq!(
+                cpu.i,
+                original_i + x as u16 + 1,
+                "I should be incremented properly"
+            )
+        }
+        #[test]
+        fn load_regs() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            Cpu::write_fonts_to_mem(&mut mem);
+            let x = 0x3;
+            cpu.i = 0x400;
+            let original_i = 0x400;
+            for reg in 0..=x {
+                let reg_addr = original_i + reg as u16;
+                mem.write(reg_addr, 55).unwrap();
+            }
+            cpu.load_regs(x, &mut mem);
+            assert_eq!(cpu.v[0], 55, "V0 should be 55");
+            assert_eq!(cpu.v[1], 55, "V1 should be 55");
+            assert_eq!(cpu.v[2], 55, "V2 should be 55");
+            assert_eq!(cpu.v[x as usize], 55, "Vx should be 55");
+            assert_eq!(
+                cpu.i,
+                original_i + x as u16 + 1,
+                "I should be incremented properly"
+            )
         }
     }
 }
