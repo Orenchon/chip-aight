@@ -174,20 +174,52 @@ impl Cpu {
         mem: &mut memory::Memory,
         state: &mut [[bool; 32]; 64],
         keys_pressed: &[bool; 16],
-    ) {
-        let op_code = mem.read(self.program_counter).unwrap();
-        let first_nibble = (op_code & 0xF000) as u8;
+    ) -> Result<&'static str, &'static str> {
+        let op_code = mem
+            .read(self.program_counter)
+            .expect("run_cycle: Failed to read op_code");
+        let first_nibble = (op_code >> 12) as u8;
         let nnn = op_code & 0xFFF;
         let nn = (op_code & 0xFF) as u8;
-        let x = (op_code & 0xF00) as u8;
-        let y = (op_code & 0xF0) as u8;
+        let x = ((op_code & 0xF00) >> 8) as u8;
+        let y = ((op_code & 0xF0) >> 4) as u8;
         let n = (op_code & 0xF) as u8;
         match first_nibble {
-            0x0 => {}
-            0x1 => {}
-            0x2 => {}
-            0x3 => {}
-            _ => {}
+            0x0 => match op_code {
+                0x00E0 => return Ok(self.cls(state)),
+                0x00EE => return Ok(self.ret_sub()),
+                _ => return Ok(self.ml_sub(nnn)),
+            },
+            0x1 => return Ok(self.jump(nnn)),
+            0x2 => return Ok(self.call_sub(nnn)),
+            0x3 => return Ok(self.if_reg_equals_nn(x, nn)),
+            0x4 => return Ok(self.if_not_reg_equals_nn(x, nn)),
+            0x5 => match n {
+                0 => return Ok(self.if_reg_equals_reg(x, y)),
+                _ => return Err("5xy0: Tail nibble was not 0x0"),
+            },
+            0x6 => return Ok(self.reg_store_nn(x, nn)),
+            0x7 => return Ok(self.reg_add_nn(x, nn)),
+            0x8 => match n {
+                0x0 => return Ok(self.assign_reg_to_reg(x, y)),
+                0x1 => return Ok(self.reg_or_reg(x, y)),
+                0x2 => return Ok(self.reg_and_reg(x, y)),
+                0x3 => return Ok(self.reg_xor_reg(x, y)),
+                0x4 => return Ok(self.reg_plus_reg(x, y)),
+                0x5 => return Ok(self.reg_minus_reg(x, y)),
+                0x6 => return Ok(self.reg_shift_right(x)),
+                0x7 => return Ok(self.reverse_reg_minus_reg(x, y)),
+                0xE => return Ok(self.reg_shift_left(x)),
+                _ => return Err("n was not in the expected values for 0x8... ops"),
+            },
+            /*0x9 => {}
+            0xA => {}
+            0xB => {}
+            0xC => {}
+            0xD => {}
+            0xE => {}
+            0xF => {}*/
+            _ => return Err("first_nibble bigger than 0xF"),
         }
     }
     /// Used to load the fonts in the default location so that they can be used by Dxyn/draw_sprite()
@@ -202,116 +234,140 @@ impl Cpu {
     }
     /// 0nnn - Execute machine language subroutine at nnn
     /// Implemented same as 2nnn in this case
-    fn ml_sub(&mut self, addr: u16) {
-        self.call_sub(addr)
+    fn ml_sub(&mut self, addr: u16) -> &'static str {
+        self.call_sub(addr);
+        return "0nnn";
     }
-    /// 0E00 - cls()
-    fn cls(&self, state: &mut [[bool; 32]; 64]) {
+    /// 00E0 - cls()
+    fn cls(&self, state: &mut [[bool; 32]; 64]) -> &'static str {
         *state = [[false; 32]; 64];
+        return "0E00";
     }
     /// 00EE - Return from subroutine
-    fn ret_sub(&mut self) {
-        let popped_addr = self.stack.pop().unwrap();
-        self.program_counter = popped_addr
+    fn ret_sub(&mut self) -> &'static str {
+        let popped_addr = self.stack.pop().expect("00EE: No addresses to pop");
+        self.program_counter = popped_addr;
+        return "00EE";
     }
     /// 1nnn - Jump to nnn
-    fn jump(&mut self, addr: u16) {
+    fn jump(&mut self, addr: u16) -> &'static str {
         self.program_counter = addr - 1;
+        return "1nnn";
     }
     /// 2nnn - Execute subroutine at nnn
-    fn call_sub(&mut self, addr: u16) {
+    fn call_sub(&mut self, addr: u16) -> &'static str {
         self.stack.push(self.program_counter);
-        self.program_counter = addr - 1
+        self.program_counter = addr - 1;
+        return "2nnn";
     }
     /// 3xnn - Skip if Vx == nn
-    fn if_reg_equals_nn(&mut self, x: u8, nn: u8) {
+    fn if_reg_equals_nn(&mut self, x: u8, nn: u8) -> &'static str {
         let vx = self.v[x as usize];
         if vx == nn {
             self.program_counter = self.program_counter + 1
-        }
+        };
+        return "3xnn";
     }
     /// 4xnn - Skip if Vx != nn
-    fn if_not_reg_equals_nn(&mut self, x: u8, nn: u8) {
+    fn if_not_reg_equals_nn(&mut self, x: u8, nn: u8) -> &'static str {
         let vx = self.v[x as usize];
         if vx != nn {
             self.program_counter = self.program_counter + 1
         }
+
+        return "4xnn";
     }
     /// 5xy0 - Skip if Vx == Vy
-    fn if_reg_equals_reg(&mut self, x: u8, y: u8) {
+    fn if_reg_equals_reg(&mut self, x: u8, y: u8) -> &'static str {
         if self.v[x as usize] == self.v[y as usize] {
             self.program_counter = self.program_counter + 1
         }
+        return "5xy0";
     }
     /// 6xnn - Vx = nn
-    fn reg_store_nn(&mut self, x: u8, nn: u8) {
-        self.v[x as usize] = nn
+    fn reg_store_nn(&mut self, x: u8, nn: u8) -> &'static str {
+        self.v[x as usize] = nn;
+        return "6xnn";
     }
     /// 7xnn - Vx = Vx + nn; CHECK OVERFLOW BEHAVIOR
-    fn reg_add_nn(&mut self, x: u8, nn: u8) {
-        self.v[x as usize] = self.v[x as usize] + nn
+    fn reg_add_nn(&mut self, x: u8, nn: u8) -> &'static str {
+        self.v[x as usize] = self.v[x as usize] + nn;
+        return "7xnn";
     }
     /// 8xy0 - Vx = Vy
-    fn assign_reg_to_reg(&mut self, x: u8, y: u8) {
-        self.v[x as usize] = self.v[y as usize]
+    fn assign_reg_to_reg(&mut self, x: u8, y: u8) -> &'static str {
+        self.v[x as usize] = self.v[y as usize];
+        return "8xy0";
     }
     /// 8xy1 - Vx = Vx | Vy
-    fn reg_or_reg(&mut self, x: u8, y: u8) {
-        self.v[x as usize] = self.v[x as usize] | self.v[y as usize]
+    fn reg_or_reg(&mut self, x: u8, y: u8) -> &'static str {
+        self.v[x as usize] = self.v[x as usize] | self.v[y as usize];
+        return "8xy1";
     }
     /// 8xy2 - Vx = Vx & Vy
-    fn reg_and_reg(&mut self, x: u8, y: u8) {
-        self.v[x as usize] = self.v[x as usize] & self.v[y as usize]
+    fn reg_and_reg(&mut self, x: u8, y: u8) -> &'static str {
+        self.v[x as usize] = self.v[x as usize] & self.v[y as usize];
+        return "8xy2";
     }
     /// 8xy3 - Vx = Vx ^ Vy
-    fn reg_xor_reg(&mut self, x: u8, y: u8) {
-        self.v[x as usize] = self.v[x as usize] ^ self.v[y as usize]
+    fn reg_xor_reg(&mut self, x: u8, y: u8) -> &'static str {
+        self.v[x as usize] = self.v[x as usize] ^ self.v[y as usize];
+        return "8xy3";
     }
     /// 8xy4 - Vx = Vx + Vy; VF = Carry?
-    fn reg_plus_reg(&mut self, x: u8, y: u8) {
+    fn reg_plus_reg(&mut self, x: u8, y: u8) -> &'static str {
         let result = self.v[x as usize].overflowing_add(self.v[y as usize]);
         self.v[x as usize] = result.0;
         self.v[0xF] = result.1 as u8;
+        return "8xy4";
     }
     /// 8xy5 - Vx = Vx - Vy; VF = 0 if borrow else 1
-    fn reg_minus_reg(&mut self, x: u8, y: u8) {
+    fn reg_minus_reg(&mut self, x: u8, y: u8) -> &'static str {
         let result = self.v[x as usize].overflowing_sub(self.v[y as usize]);
         self.v[x as usize] = result.0;
         self.v[0xF] = (!result.1) as u8;
+        return "8xy5";
     }
     /// 8xy6 - Vx = Vy >> 1; VF = Vy & 1
-    fn reg_shift_right(&mut self, x: u8) {
+    fn reg_shift_right(&mut self, x: u8) -> &'static str {
         self.v[0xF] = self.v[x as usize] & 1;
         self.v[x as usize] = self.v[x as usize] >> 1;
+        return "8xy6";
     }
     /// 8xy7 - Vx = Vy - Vx; VF = Borrow?
-    fn reverse_reg_minus_reg(&mut self, x: u8, y: u8) {
+    fn reverse_reg_minus_reg(&mut self, x: u8, y: u8) -> &'static str {
         let result = self.v[y as usize].overflowing_sub(self.v[x as usize]);
         self.v[x as usize] = result.0;
         self.v[0xF] = (!result.1) as u8;
+        return "8xy7";
     }
     /// 8xyE - Vx = Vy << 1; VF = Vy >> 7
-    fn reg_shift_left(&mut self, x: u8) {
+    fn reg_shift_left(&mut self, x: u8) -> &'static str {
         self.v[0xF] = self.v[x as usize] >> 7;
         self.v[x as usize] = self.v[x as usize] << 1;
+        return "8xyE";
     }
     /// 9xy0 - Skip if Vx != Vy
-    fn if_not_reg_equals_reg(&mut self, x: u8, y: u8) {
+    fn if_not_reg_equals_reg(&mut self, x: u8, y: u8) -> &'static str {
         if self.v[x as usize] != self.v[y as usize] {
-            self.program_counter = self.program_counter + 1
+            self.program_counter = self.program_counter + 1;
         }
+        return "9xy0";
     }
     /// Annn - I = nnn
-    fn store_addr(&mut self, nnn: u16) {
+    fn store_addr(&mut self, nnn: u16) -> &'static str {
         self.i = nnn;
+        return "Annn";
     }
     /// Bnnn - Jump to nnn + V0
-    fn reg_plus_nnn_jump(&mut self, nnn: u16) {
-        self.program_counter = self.v[0] as u16 + nnn - 1
+    fn reg_plus_nnn_jump(&mut self, nnn: u16) -> &'static str {
+        self.program_counter = self.v[0] as u16 + nnn - 1;
+        return "Bnnn";
     }
     /// Cxnn = Vx = Rand() & nn
-    fn random(&mut self, x: u8, nn: u8) {
+    fn random(&mut self, x: u8, nn: u8) -> &'static str {
         self.v[x as usize] = self.rng.gen::<u8>() & nn;
+        return "Cxnn";
     }
     /// Dxyn = draw(x: Vx, y: Vy, sprite: sprite(sprite_height: n, sprite_addr: I)); VF = Pixels unset?
     fn draw_sprite(
@@ -321,11 +377,13 @@ impl Cpu {
         n: u8,
         state: &mut [[bool; 32]; 64],
         mem: &mut memory::Memory,
-    ) {
+    ) -> &'static str {
         self.v[0xF] = 0;
         for sprite_row in 0..n {
             let row_pos = (self.v[y as usize] + sprite_row) as usize;
-            let sprite_value = (mem.read(self.i + sprite_row as u16).unwrap()) as u8;
+            let sprite_value = (mem
+                .read(self.i + sprite_row as u16)
+                .expect("Dxyn: Failed to read memory")) as u8;
             //println!("{}", sprite_value);
             for sprite_col in 0..8 as u8 {
                 let col_pos = (sprite_col + self.v[x as usize]) as usize;
@@ -337,25 +395,29 @@ impl Cpu {
                 state[col_pos % 64][row_pos % 32] = (bit ^ state_bit) > 0;
             }
         }
+        return "Dxyn";
     }
     /// Ex9E = Skip if key_pressed(hex(Vx)) //keypad is formed by numbers in hex
-    fn if_key_pressed(&mut self, keys_pressed: &[bool; 16], x: u8) {
+    fn if_key_pressed(&mut self, keys_pressed: &[bool; 16], x: u8) -> &'static str {
         if keys_pressed[self.v[x as usize] as usize] {
             self.program_counter = self.program_counter + 1
         }
+        return "Ex9E";
     }
     /// ExA1 = Skip if !key_pressed(hex(Vx))
-    fn if_not_key_pressed(&mut self, keys_pressed: &[bool; 16], x: u8) {
+    fn if_not_key_pressed(&mut self, keys_pressed: &[bool; 16], x: u8) -> &'static str {
         if !keys_pressed[self.v[x as usize] as usize] {
             self.program_counter = self.program_counter + 1
         }
+        return "ExA1";
     }
     /// Fx07 = Vx = dt
-    fn store_dt(&mut self, x: u8) {
-        self.v[x as usize] = self.dt
+    fn store_dt(&mut self, x: u8) -> &'static str {
+        self.v[x as usize] = self.dt;
+        return "Fx07";
     }
     /// Fx0A = Vx = block_until_keypress()
-    fn wait_for_keypress(&mut self, x: u8, keys_pressed: &[bool; 16]) {
+    fn wait_for_keypress(&mut self, x: u8, keys_pressed: &[bool; 16]) -> &'static str {
         match self.is_key_pressed_temp {
             Some(is_key_pressed_og) => {
                 let mut modded = false; // We must not continue if not key press/release
@@ -376,27 +438,32 @@ impl Cpu {
                 self.program_counter = self.program_counter - 1
             } //Store state before wait
         }
+        return "Fx0A";
     }
     /// Fx15 = dt = Vx
-    fn dt_from_reg(&mut self, x: u8) {
-        self.dt = self.v[x as usize]
+    fn dt_from_reg(&mut self, x: u8) -> &'static str {
+        self.dt = self.v[x as usize];
+        return "Fx15";
     }
     /// Fx18 = st = Vx
-    fn st_from_reg(&mut self, x: u8) {
-        self.st = self.v[x as usize]
+    fn st_from_reg(&mut self, x: u8) -> &'static str {
+        self.st = self.v[x as usize];
+        return "Fx18";
     }
     /// Fx1E = I = I + Vx; Unconfirmed: VF = Carry?
-    fn add_reg_to_i(&mut self, x: u8) {
-        self.i = self.i + self.v[x as usize] as u16
+    fn add_reg_to_i(&mut self, x: u8) -> &'static str {
+        self.i = self.i + self.v[x as usize] as u16;
+        return "Fx1E";
     }
     /// Fx29 = I = addr(sprite(Vx))
     ///
     /// Sprite address is internal to the interpreter, it'll have to be placed within 0x000 and 0x1FF
-    fn get_sprite_address(&mut self, x: u8) {
-        self.i = (0x20 + (self.v[x as usize] * 5)) as u16
+    fn get_sprite_address(&mut self, x: u8) -> &'static str {
+        self.i = (0x20 + (self.v[x as usize] * 5)) as u16;
+        return "Fx29";
     }
     /// Fx33 = [I, I+1, I+2] = bcd(hex(Vx))
-    fn get_bcd(&mut self, x: u8, mem: &mut memory::Memory) {
+    fn get_bcd(&mut self, x: u8, mem: &mut memory::Memory) -> &'static str {
         let mut number = self.v[x as usize];
         let mut stack_of_digits: Vec<u8> = Vec::new();
         while number > 0 {
@@ -409,24 +476,29 @@ impl Cpu {
         }
         stack_of_digits.reverse();
         for (idx, digit) in stack_of_digits.iter().enumerate() {
-            mem.write(self.i + idx as u16, *digit as u16).unwrap();
+            mem.write(self.i + idx as u16, *digit as u16)
+                .expect("Fx33: Failed to write to memory");
         }
+        return "Fx33";
     }
     /// Fx55 = [I, I..., I + x] = [V0, V..., Vx]; I = I + x + 1
-    fn store_regs(&mut self, x: u8, mem: &mut memory::Memory) {
+    fn store_regs(&mut self, x: u8, mem: &mut memory::Memory) -> &'static str {
         for reg in 0..=x {
             let reg_addr = self.i + reg as u16;
-            mem.write(reg_addr, self.v[reg as usize] as u16).unwrap();
+            mem.write(reg_addr, self.v[reg as usize] as u16)
+                .expect("Fx55: Failed to write to memory");
         }
-        self.i = self.i + x as u16 + 1
+        self.i = self.i + x as u16 + 1;
+        return "Fx55";
     }
     /// Fx65 = [V0, V..., Vx] = [I, I..., I + x]; I = I + x + 1
-    fn load_regs(&mut self, x: u8, mem: &mut memory::Memory) {
+    fn load_regs(&mut self, x: u8, mem: &mut memory::Memory) -> &'static str {
         for reg in 0..=x {
             let reg_addr = self.i + reg as u16;
-            self.v[reg as usize] = mem.read(reg_addr).unwrap() as u8;
+            self.v[reg as usize] = mem.read(reg_addr).expect("Fx65: Failed to read memory") as u8;
         }
-        self.i = self.i + x as u16 + 1
+        self.i = self.i + x as u16 + 1;
+        return "Fx65";
     }
 }
 
@@ -1224,6 +1296,350 @@ mod tests {
                 original_i + x as u16 + 1,
                 "I should be incremented properly"
             )
+        }
+    }
+    mod cycle {
+        use super::super::memory::Memory;
+        use super::Cpu;
+        #[test]
+        fn ml_sub() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x0100)
+                .expect("Example instruction did not write correctly");
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "0nnn");
+        }
+        #[test]
+        fn cls() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x00E0)
+                .expect("Example instruction did not write correctly");
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "0E00");
+        }
+        #[test]
+        fn ret_sub() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x00EE)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "00EE");
+        }
+        #[test]
+        fn jump() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x1400)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "1nnn");
+        }
+        #[test]
+        fn call_sub() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x2400)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "2nnn");
+        }
+        #[test]
+        fn if_reg_equals_nn() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x3410)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "3xnn");
+        }
+        #[test]
+        fn if_not_reg_equals_nn() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x4410)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "4xnn");
+        }
+        #[test]
+        fn if_reg_equals_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x5120)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "5xy0");
+        }
+        #[test]
+        fn reg_store_nn() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x64FF)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "6xnn");
+        }
+        #[test]
+        fn reg_add_nn() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x7401)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "7xnn");
+        }
+        #[test]
+        fn assign_reg_to_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x8120)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "8xy0");
+        }
+        #[test]
+        fn reg_or_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x8121)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "8xy1");
+        }
+        #[test]
+        fn reg_and_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x8122)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "8xy2");
+        }
+        #[test]
+        fn reg_xor_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x8123)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "8xy3");
+        }
+        #[test]
+        fn reg_plus_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x8124)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "8xy4");
+        }
+        #[test]
+        fn reg_minus_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x8125)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "8xy5");
+        }
+        #[test]
+        fn reg_shift_right() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x8126)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "8xy6");
+        }
+        #[test]
+        fn reverse_reg_minus_reg() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x8127)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "8xy7");
+        }
+        #[test]
+        fn reg_shift_left() {
+            let mut cpu = Cpu {
+                ..Default::default()
+            };
+            let mut test_state: [[bool; 32]; 64] = [[false; 32]; 64];
+            let is_key_pressed: [bool; 16] = [false; 16];
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            mem.write(0x200, 0x812E)
+                .expect("Example instruction did not write correctly");
+            cpu.stack.push(0x200);
+            let result = cpu
+                .run_cycle(&mut mem, &mut test_state, &is_key_pressed)
+                .expect("Cycle did not run correctly");
+            assert_eq!(result, "8xyE");
         }
     }
 }
