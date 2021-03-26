@@ -142,6 +142,11 @@ impl Default for Cpu {
 *   Fx65 = [V0, V..., Vx] = [I, I..., I + x]; I = I + x + 1
 */
 
+struct Execution {
+    ms: usize,
+    function: &'static str,
+}
+
 impl Cpu {
     /// Each subarray is a different number, from 0x0 to 0xF
     pub const FONT: [[u16; 5]; 16] = [
@@ -163,6 +168,28 @@ impl Cpu {
         [0xF0, 0x80, 0xF0, 0x80, 0x80], // F Done
     ];
 
+    /// Run one instruction on the CPU
+    pub fn run_cycle(
+        &mut self,
+        mem: &mut memory::Memory,
+        state: &mut [[bool; 32]; 64],
+        keys_pressed: &[bool; 16],
+    ) {
+        let op_code = mem.read(self.program_counter).unwrap();
+        let first_nibble = (op_code & 0xF000) as u8;
+        let nnn = op_code & 0xFFF;
+        let nn = (op_code & 0xFF) as u8;
+        let x = (op_code & 0xF00) as u8;
+        let y = (op_code & 0xF0) as u8;
+        let n = (op_code & 0xF) as u8;
+        match first_nibble {
+            0x0 => {}
+            0x1 => {}
+            0x2 => {}
+            0x3 => {}
+            _ => {}
+        }
+    }
     /// Used to load the fonts in the default location so that they can be used by Dxyn/draw_sprite()
     pub fn write_fonts_to_mem(mem: &mut memory::Memory) {
         for (idx, sprite) in Cpu::FONT.iter().flatten().enumerate() {
