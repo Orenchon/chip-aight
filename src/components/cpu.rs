@@ -184,6 +184,8 @@ impl Cpu {
         let x = ((op_code & 0xF00) >> 8) as u8;
         let y = ((op_code & 0xF0) >> 4) as u8;
         let n = (op_code & 0xF) as u8;
+
+        println!("{:x}: {:x}", self.program_counter - 0x200, op_code);
         let result = match first_nibble {
             0x0 => match op_code {
                 0x00E0 => Ok(self.cls(state)),
@@ -280,12 +282,13 @@ impl Cpu {
         self.program_counter = addr - 1;
         return "2nnn";
     }
-    /// 3xnn - Skip if Vx == nn
+    /// 3xnn - Skip if Vx == nn - OK
     fn if_reg_equals_nn(&mut self, x: u8, nn: u8) -> &'static str {
         let vx = self.v[x as usize];
         if vx == nn {
             self.program_counter = self.program_counter + 1
         };
+        println!("{} == {}: {}", vx, nn, vx == nn);
         return "3xnn";
     }
     /// 4xnn - Skip if Vx != nn
@@ -304,14 +307,16 @@ impl Cpu {
         }
         return "5xy0";
     }
-    /// 6xnn - Vx = nn
+    /// 6xnn - Vx = nn - OK
     fn reg_store_nn(&mut self, x: u8, nn: u8) -> &'static str {
         self.v[x as usize] = nn;
         return "6xnn";
     }
     /// 7xnn - Vx = Vx + nn; CHECK OVERFLOW BEHAVIOR
     fn reg_add_nn(&mut self, x: u8, nn: u8) -> &'static str {
+        let old_v = self.v[x as usize];
         self.v[x as usize] = self.v[x as usize].overflowing_add(nn).0;
+        println!("{} + {} = {}", old_v, nn, self.v[x as usize]);
         return "7xnn";
     }
     /// 8xy0 - Vx = Vy
@@ -367,11 +372,12 @@ impl Cpu {
         self.v[x as usize] = self.v[x as usize] << 1;
         return "8xyE";
     }
-    /// 9xy0 - Skip if Vx != Vy
+    /// 9xy0 - Skip if Vx != Vy - OK
     fn if_not_reg_equals_reg(&mut self, x: u8, y: u8) -> &'static str {
         if self.v[x as usize] != self.v[y as usize] {
             self.program_counter = self.program_counter + 1;
         }
+        println!("{:x}, {:x}", self.v[x as usize], self.v[y as usize]);
         return "9xy0";
     }
     /// Annn - I = nnn
@@ -460,7 +466,7 @@ impl Cpu {
         }
         return "Fx0A";
     }
-    /// Fx15 = dt = Vx
+    /// Fx15 = dt = Vx - OK
     fn dt_from_reg(&mut self, x: u8) -> &'static str {
         self.dt = self.v[x as usize];
         return "Fx15";
