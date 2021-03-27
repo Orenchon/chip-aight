@@ -1,5 +1,19 @@
-struct Memory {
-    space: [u8; Memory::BYTE_MAX],
+//! # CHIP-8 Memory Module
+//! ## Description
+//! Represents the RAM of the virtual computer.
+//! There are 0xFFF (4096) addresses available, and each is 16 bits in size.
+//! ## Operation
+//! The functions serve to abstract away the following operations:
+//! * Loading a new program to memory
+//! * Reading a specific address
+//! * Writing to a specific address
+//! Inside the struct, the memory is represented as an array of u8, and the functions join or split the inputs and outputs when necessary.
+
+/// Represents the memory of the virtual computer.
+///
+/// Remember to load the fonts so they can be used by the programs.
+pub struct Memory {
+    pub space: [u8; Memory::BYTE_MAX],
 }
 
 impl Default for Memory {
@@ -11,11 +25,16 @@ impl Default for Memory {
 }
 
 impl Memory {
-    const START: u16 = 0x200; // CHIP-8 programs are loaded at address 0x200, 0x000 to 0x1FF is reserved for the interpreter
+    /// CHIP-8 programs are loaded at address 0x200, 0x000 to 0x1FF is reserved for the interpreter.
+    const START: u16 = 0x200;
+    /// It is technically impossible to access more than 0xFFF due to how the I register is loaded.
     const MAX: u16 = 0xFFF;
-    const BYTE_MAX: usize = 8192; // The biggest memory size used with the CHIP-8 is 8k on the COSMAC VIP
+    /// The biggest memory size used with the CHIP-8 is 8k on the COSMAC VIP.
+    const BYTE_MAX: usize = 8192;
+    /// Maximun size a program can be.
     const USABLE_SPACE: usize = (Memory::MAX as usize - Memory::START as usize + 1) * 2;
-    fn write(&mut self, pos: u16, data: u16) -> Result<&'static str, &'static str> {
+    /// Write to a memory address.
+    pub fn write(&mut self, pos: u16, data: u16) -> Result<&'static str, &'static str> {
         let pos_u: usize = (pos * 2) as usize;
         if pos >= Memory::START && pos <= Memory::MAX {
             let data_head: u8 = (data >> 8) as u8;
@@ -27,7 +46,22 @@ impl Memory {
             return Err("Out of bounds exception");
         }
     }
-    fn read(&mut self, pos: u16) -> Result<u16, &'static str> {
+    /// Write to a memory address without checking for lower bounds.
+    /// Used for loading fonts to the interpreter reserved space.
+    pub fn unbound_write(&mut self, pos: u16, data: u16) -> Result<&'static str, &'static str> {
+        let pos_u: usize = (pos * 2) as usize;
+        if pos <= Memory::MAX {
+            let data_head: u8 = (data >> 8) as u8;
+            let data_tail: u8 = (data & 0xFF) as u8;
+            self.space[pos_u] = data_head;
+            self.space[pos_u + 1] = data_tail;
+            return Ok("Ok");
+        } else {
+            return Err("Out of bounds exception");
+        }
+    }
+    /// Read the value from a memory address.
+    pub fn read(&mut self, pos: u16) -> Result<u16, &'static str> {
         let pos_u: usize = (pos * 2) as usize;
         if pos <= Memory::MAX {
             let data_head: u16 = ((self.space[pos_u]) as u16) << 8;
@@ -37,7 +71,8 @@ impl Memory {
             return Err("Out of bounds exception");
         }
     }
-    fn load(&mut self, program: &[u8]) -> Result<&'static str, &'static str> {
+    /// Load a program to memory, it starts at 0x200.
+    pub fn load(&mut self, program: &[u8]) -> Result<&'static str, &'static str> {
         let mut pos: usize = (Memory::START * 2) as usize;
         if program.len() <= Memory::USABLE_SPACE {
             for byte in program {

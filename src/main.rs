@@ -17,7 +17,7 @@ mod dumb_tests {
         assert_eq!(2 + 2, 4);
     }
 }
-static KEY_MAP: [VirtualKeyCode; 16] = [
+/*static KEY_MAP: [VirtualKeyCode; 16] = [
     VirtualKeyCode::Key1,
     VirtualKeyCode::Key2,
     VirtualKeyCode::Key3,
@@ -34,7 +34,26 @@ static KEY_MAP: [VirtualKeyCode; 16] = [
     VirtualKeyCode::X,
     VirtualKeyCode::C,
     VirtualKeyCode::V,
+];*/
+static KEY_MAP: [VirtualKeyCode; 16] = [
+    VirtualKeyCode::Key1, // 1
+    VirtualKeyCode::Key2, // 2
+    VirtualKeyCode::Key3, // 3
+    VirtualKeyCode::Q,    // 4
+    VirtualKeyCode::W,    // 5
+    VirtualKeyCode::E,    // 6
+    VirtualKeyCode::A,    // 7
+    VirtualKeyCode::S,    // 8
+    VirtualKeyCode::D,    // 9
+    VirtualKeyCode::Z,    // A
+    VirtualKeyCode::X,    // 0
+    VirtualKeyCode::C,    // B
+    VirtualKeyCode::Key4, // C
+    VirtualKeyCode::R,    // D
+    VirtualKeyCode::F,    // E
+    VirtualKeyCode::V,    // F
 ];
+
 fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();

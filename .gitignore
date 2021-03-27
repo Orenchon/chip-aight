@@ -14,4 +14,11 @@ Cargo.lock
 
 /target
 
+# Profiling data
+
+*.profraw
+*.profdata
+
+# Binary files
+
 /data
