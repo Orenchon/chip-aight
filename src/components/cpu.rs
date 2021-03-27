@@ -48,7 +48,7 @@ pub struct Cpu {
     /// The CHIP-8 interpreter has 16 general purpose data registers, V0 to VF.
     /// Each is 8 bits in length.
     /// Instructions write, read, add, substract or even more to these registers.
-    v: [u8; 16],
+    pub v: [u8; 16],
     /// Subroutine stack
     ///
     /// When 2NNN or 0NNN is called, the current PC should be pushed to it.
@@ -57,23 +57,23 @@ pub struct Cpu {
     ///
     /// In reality, the stack would have a limited size based on physical constraints.
     /// Vec is infinite
-    stack: Vec<u16>,
+    pub stack: Vec<u16>,
     /// Program counter
     ///
     /// It tells us what the current instruction to be executed is.
     /// Always set to 0x200 when execution begins
     /// (Only valid for regular CHIP-8 implementations, others may vary).
-    program_counter: u16,
+    pub program_counter: u16,
     /// Address register
     ///
     /// Used with read and write operations.
     /// Due to the way op addresses work, only 12 bits can be actually loaded.
-    i: u16,
+    pub i: u16,
     /// Delay timer
     ///
     /// Counts down at a rate of 1 per second until 0 is reached.
     /// Set by instruction Fx15 and read by using Fx07.
-    dt: u8,
+    pub dt: u8,
     /// Sound timer
     ///
     /// Counts down at 60 hertz just like the Delay timer.
@@ -82,11 +82,11 @@ pub struct Cpu {
     /// The waveform and frequency is unspecified.
     /// Set by instruction Fx18.
     /// Will do nothing if set to 0x01
-    st: u8,
+    pub st: u8,
     /// Used to generate random numbers for Cxnn
-    rng: rand::rngs::ThreadRng,
+    pub rng: rand::rngs::ThreadRng,
     /// Used by the Fx0A instruction to be able to compare changes in state
-    is_key_pressed_temp: Option<[bool; 16]>,
+    pub is_key_pressed_temp: Option<[bool; 16]>,
 }
 
 impl Default for Cpu {
@@ -311,7 +311,7 @@ impl Cpu {
     }
     /// 7xnn - Vx = Vx + nn; CHECK OVERFLOW BEHAVIOR
     fn reg_add_nn(&mut self, x: u8, nn: u8) -> &'static str {
-        self.v[x as usize] = self.v[x as usize] + nn;
+        self.v[x as usize] = self.v[x as usize].overflowing_add(nn).0;
         return "7xnn";
     }
     /// 8xy0 - Vx = Vy
