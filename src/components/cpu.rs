@@ -87,6 +87,8 @@ pub struct Cpu {
     pub rng: rand::rngs::ThreadRng,
     /// Used by the Fx0A instruction to be able to compare changes in state
     pub is_key_pressed_temp: Option<[bool; 16]>,
+    /// In some implementations, Fx55 and Fx65 don't change the value of I
+    pub store_load_quirk: bool,
 }
 
 impl Default for Cpu {
@@ -100,6 +102,7 @@ impl Default for Cpu {
             st: 0,
             rng: rand::thread_rng(),
             is_key_pressed_temp: None,
+            store_load_quirk: false,
         }
     }
 }
@@ -185,12 +188,16 @@ impl Cpu {
         let y = ((op_code & 0xF0) >> 4) as u8;
         let n = (op_code & 0xF) as u8;
 
-        println!("{:x}: {:x}", self.program_counter - 0x200, op_code);
+        println!(
+            "{:x}: {:x}",
+            (self.program_counter * 2) - 0x200 * 2,
+            op_code
+        );
         let result = match first_nibble {
             0x0 => match op_code {
                 0x00E0 => Ok(self.cls(state)),
                 0x00EE => Ok(self.ret_sub()),
-                _ => Ok(self.ml_sub(nnn)),
+                _ => self.ml_sub(nnn),
             },
             0x1 => Ok(self.jump(nnn)),
             0x2 => Ok(self.call_sub(nnn)),
@@ -256,9 +263,14 @@ impl Cpu {
     }
     /// 0nnn - Execute machine language subroutine at nnn
     /// Implemented same as 2nnn in this case
-    fn ml_sub(&mut self, addr: u16) -> &'static str {
-        self.call_sub(addr);
-        return "0nnn";
+    fn ml_sub(&mut self, addr: u16) -> Result<&'static str, &'static str> {
+        match addr {
+            0 => return Err("Failed test run"),
+            _ => {
+                self.call_sub(addr);
+                return Ok("0nnn");
+            }
+        }
     }
     /// 00E0 - cls()
     fn cls(&self, state: &mut [[bool; 32]; 64]) -> &'static str {
@@ -513,8 +525,11 @@ impl Cpu {
             let reg_addr = self.i + reg as u16;
             mem.write(reg_addr, self.v[reg as usize] as u16)
                 .expect("Fx55: Failed to write to memory");
+            println!("I + {}: {:4x}", reg, self.i + reg as u16)
         }
-        self.i = self.i + x as u16 + 1;
+        if !self.store_load_quirk {
+            self.i = self.i + x as u16 + 1;
+        }
         return "Fx55";
     }
     /// Fx65 = [V0, V..., Vx] = [I, I..., I + x]; I = I + x + 1
@@ -522,8 +537,11 @@ impl Cpu {
         for reg in 0..=x {
             let reg_addr = self.i + reg as u16;
             self.v[reg as usize] = mem.read(reg_addr).expect("Fx65: Failed to read memory") as u8;
+            println!("I + {}: {:4x}", reg, self.i + reg as u16)
         }
-        self.i = self.i + x as u16 + 1;
+        if !self.store_load_quirk {
+            self.i = self.i + x as u16 + 1;
+        }
         return "Fx65";
     }
 }

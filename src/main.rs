@@ -61,19 +61,25 @@ static KEY_MAP: [VirtualKeyCode; 16] = [
 fn main() {
     let args: Vec<String> = env::args().collect();
     let program = args[0].clone();
-    let mut hz: u128 = 500;
     let mut opts = Options::new();
     opts.optopt("h", "hertz", "Custom cpu operations per second", "INT");
+    opts.optflag(
+        "",
+        "store-load-quirks",
+        "Used to not change the value of I in Fx55 and Fx65",
+    );
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => {
             panic!(f.to_string())
         }
     };
+    let mut hz: u128 = 500;
     hz = match matches.opt_str("hertz") {
         Some(hertz) => hertz.parse::<u128>().expect("hz is not a valid number"),
         _ => hz,
     };
+
     let one_cycle_time: u128 = 1000000 / hz;
     let filename = if !matches.free.is_empty() {
         matches.free[0].clone()
@@ -91,6 +97,7 @@ fn main() {
     let mut cpu = Cpu {
         ..Default::default()
     };
+    cpu.store_load_quirk = matches.opt_present("store-load-quirks");
     mem.load(&file).expect("Couldn't load program to memory");
     Cpu::write_fonts_to_mem(&mut mem);
     //mem.print_memory();
@@ -103,6 +110,7 @@ fn main() {
     let mut last_draw = Instant::now();
     let mut last_cpu = Instant::now();
     let mut sound_system = SoundManager::new().unwrap();
+    let mut keep_trying = true;
     //sound_system.play();
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -154,8 +162,13 @@ fn main() {
                 let mut executions_per_run = 0;
                 while spent_time < micro_time {
                     executions_per_run = executions_per_run + 1;
-                    cpu.run_cycle(&mut mem, &mut state, &is_key_pressed)
-                        .expect("CPU Cycle Failed!");
+                    if keep_trying {
+                        let result = cpu.run_cycle(&mut mem, &mut state, &is_key_pressed);
+                        match result {
+                            Err(_) => keep_trying = false,
+                            _ => (),
+                        }
+                    }
                     spent_time = spent_time + one_cycle_time;
                 }
                 last_cpu = Instant::now();
