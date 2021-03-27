@@ -68,6 +68,7 @@ fn main() {
         "store-load-quirks",
         "Used to not change the value of I in Fx55 and Fx65",
     );
+    opts.optflag("", "shift-y", "Used to use y as a base in shift functions");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => {
@@ -98,6 +99,7 @@ fn main() {
         ..Default::default()
     };
     cpu.store_load_quirk = matches.opt_present("store-load-quirks");
+    cpu.shift_y = matches.opt_present("shift-y");
     mem.load(&file).expect("Couldn't load program to memory");
     Cpu::write_fonts_to_mem(&mut mem);
     //mem.print_memory();

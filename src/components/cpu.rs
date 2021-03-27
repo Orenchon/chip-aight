@@ -89,6 +89,8 @@ pub struct Cpu {
     pub is_key_pressed_temp: Option<[bool; 16]>,
     /// In some implementations, Fx55 and Fx65 don't change the value of I
     pub store_load_quirk: bool,
+    /// In some implementations x is shifted, in others, y is
+    pub shift_y: bool,
 }
 
 impl Default for Cpu {
@@ -103,6 +105,7 @@ impl Default for Cpu {
             rng: rand::thread_rng(),
             is_key_pressed_temp: None,
             store_load_quirk: false,
+            shift_y: false,
         }
     }
 }
@@ -216,9 +219,9 @@ impl Cpu {
                 0x3 => Ok(self.reg_xor_reg(x, y)),
                 0x4 => Ok(self.reg_plus_reg(x, y)),
                 0x5 => Ok(self.reg_minus_reg(x, y)),
-                0x6 => Ok(self.reg_shift_right(x)),
+                0x6 => Ok(self.reg_shift_right(x, y)),
                 0x7 => Ok(self.reverse_reg_minus_reg(x, y)),
-                0xE => Ok(self.reg_shift_left(x)),
+                0xE => Ok(self.reg_shift_left(x, y)),
                 _ => Err("n was not in the expected values for 0x8... ops"),
             },
             0x9 => match n {
@@ -322,12 +325,13 @@ impl Cpu {
     /// 6xnn - Vx = nn - OK
     fn reg_store_nn(&mut self, x: u8, nn: u8) -> &'static str {
         self.v[x as usize] = nn;
+        println!("V{} = {}", x, nn);
         return "6xnn";
     }
-    /// 7xnn - Vx = Vx + nn; CHECK OVERFLOW BEHAVIOR
+    /// 7xnn - Vx = Vx + nn; Overflows but doesn't set flag
     fn reg_add_nn(&mut self, x: u8, nn: u8) -> &'static str {
         let old_v = self.v[x as usize];
-        self.v[x as usize] = self.v[x as usize].overflowing_add(nn).0;
+        self.v[x as usize] = self.v[x as usize].wrapping_add(nn);
         println!("{} + {} = {}", old_v, nn, self.v[x as usize]);
         return "7xnn";
     }
@@ -366,9 +370,14 @@ impl Cpu {
         return "8xy5";
     }
     /// 8xy6 - Vx = Vy >> 1; VF = Vy & 1
-    fn reg_shift_right(&mut self, x: u8) -> &'static str {
-        self.v[0xF] = self.v[x as usize] & 1;
-        self.v[x as usize] = self.v[x as usize] >> 1;
+    fn reg_shift_right(&mut self, x: u8, y: u8) -> &'static str {
+        if self.shift_y {
+            self.v[0xF] = self.v[y as usize] & 1;
+            self.v[x as usize] = self.v[y as usize] >> 1;
+        } else {
+            self.v[0xF] = self.v[x as usize] & 1;
+            self.v[x as usize] = self.v[x as usize] >> 1;
+        }
         return "8xy6";
     }
     /// 8xy7 - Vx = Vy - Vx; VF = Borrow?
@@ -379,9 +388,14 @@ impl Cpu {
         return "8xy7";
     }
     /// 8xyE - Vx = Vy << 1; VF = Vy >> 7
-    fn reg_shift_left(&mut self, x: u8) -> &'static str {
-        self.v[0xF] = self.v[x as usize] >> 7;
-        self.v[x as usize] = self.v[x as usize] << 1;
+    fn reg_shift_left(&mut self, x: u8, y: u8) -> &'static str {
+        if self.shift_y {
+            self.v[0xF] = self.v[y as usize] >> 7;
+            self.v[x as usize] = self.v[y as usize] << 1;
+        } else {
+            self.v[0xF] = self.v[x as usize] >> 7;
+            self.v[x as usize] = self.v[x as usize] << 1;
+        }
         return "8xyE";
     }
     /// 9xy0 - Skip if Vx != Vy - OK
@@ -490,7 +504,9 @@ impl Cpu {
     }
     /// Fx1E = I = I + Vx; Unconfirmed: VF = Carry?
     fn add_reg_to_i(&mut self, x: u8) -> &'static str {
+        let old_i = self.i;
         self.i = self.i + self.v[x as usize] as u16;
+        println!("{} + {} = {}", old_i, self.v[x as usize], self.i);
         return "Fx1E";
     }
     /// Fx29 = I = addr(sprite(Vx))
@@ -525,7 +541,12 @@ impl Cpu {
             let reg_addr = self.i + reg as u16;
             mem.write(reg_addr, self.v[reg as usize] as u16)
                 .expect("Fx55: Failed to write to memory");
-            println!("I + {}: {:4x}", reg, self.i + reg as u16)
+            println!(
+                "I + {}: {:4x} = {}",
+                reg,
+                (self.i - 0x200 + reg as u16) * 2,
+                self.v[reg as usize]
+            )
         }
         if !self.store_load_quirk {
             self.i = self.i + x as u16 + 1;
@@ -537,7 +558,12 @@ impl Cpu {
         for reg in 0..=x {
             let reg_addr = self.i + reg as u16;
             self.v[reg as usize] = mem.read(reg_addr).expect("Fx65: Failed to read memory") as u8;
-            println!("I + {}: {:4x}", reg, self.i + reg as u16)
+            /*println!(
+                "I + {}: {:4x} = {}",
+                reg,
+                (self.i - 0x200 + reg as u16) * 2,
+                self.v[reg as usize]
+            )*/
         }
         if !self.store_load_quirk {
             self.i = self.i + x as u16 + 1;
