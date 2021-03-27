@@ -66,6 +66,7 @@ impl Memory {
         if pos <= Memory::MAX {
             let data_head: u16 = ((self.space[pos_u]) as u16) << 8;
             let data_tail: u16 = (self.space[pos_u + 1]) as u16;
+            //println!("{:x} {:x}", self.space[pos_u], self.space[pos_u + 1]);
             return Ok(data_head | data_tail);
         } else {
             return Err("Out of bounds exception");
@@ -73,15 +74,25 @@ impl Memory {
     }
     /// Load a program to memory, it starts at 0x200.
     pub fn load(&mut self, program: &[u8]) -> Result<&'static str, &'static str> {
-        let mut pos: usize = (Memory::START * 2) as usize;
+        let pos: usize = (Memory::START * 2) as usize;
         if program.len() <= Memory::USABLE_SPACE {
-            for byte in program {
-                self.space[pos] = byte.clone();
-                pos = pos + 1;
+            let mut idx: usize = 0;
+            while idx < program.len() {
+                self.space[pos + idx] = program[idx].clone();
+                idx = idx + 1
             }
             return Ok("Ok");
         } else {
             return Err("Program bigger than memory space");
+        }
+    }
+    pub fn print_memory(&mut self) {
+        for idx in 0x200..=Memory::MAX {
+            println!(
+                "{:4x}: {:4x}",
+                idx - 0x200,
+                self.read(idx).expect("Couldn't print a valid memory addr")
+            )
         }
     }
 }
@@ -173,6 +184,19 @@ mod tests {
             let result: Result<u16, &'static str> = mem.read(pos);
             assert!(!result.is_err(), "Failed to read memory");
             assert_eq!(mem.read(pos).unwrap(), 0xFF00, "Wrong value received");
+        }
+        #[test]
+        fn test_every_addr() {
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            for idx in 0x200..=Memory::MAX {
+                println!(
+                    "{:4x}: {:4x}",
+                    idx - 0x200,
+                    mem.read(idx).expect("Couldn't print a valid memory addr")
+                )
+            }
         }
     }
 }
