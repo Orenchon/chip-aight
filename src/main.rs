@@ -70,11 +70,7 @@ fn main() {
             panic!(f.to_string())
         }
     };
-    if matches.opt_present("h") {
-        print_usage(&program, opts);
-        return;
-    }
-    hz = match matches.opt_str("h") {
+    hz = match matches.opt_str("hertz") {
         Some(hertz) => hertz.parse::<u128>().expect("hz is not a valid number"),
         _ => hz,
     };
@@ -96,6 +92,8 @@ fn main() {
         ..Default::default()
     };
     mem.load(&file).expect("Couldn't load program to memory");
+    Cpu::write_fonts_to_mem(&mut mem);
+    //mem.print_memory();
     let mut is_key_pressed: [bool; 16] = [false; 16];
     let last_frame = 0;
     let size = window.inner_size();
@@ -160,12 +158,17 @@ fn main() {
                         .expect("CPU Cycle Failed!");
                     spent_time = spent_time + one_cycle_time;
                 }
-                println!("{}", executions_per_run);
                 last_cpu = Instant::now();
             }
             if last_draw.elapsed().as_millis() > 16 {
                 window.request_redraw();
                 last_draw = Instant::now();
+                if cpu.dt > 0 {
+                    cpu.dt = cpu.dt - 1
+                };
+                if cpu.st > 0 {
+                    cpu.st = cpu.st - 1
+                };
             }
 
             *control_flow = ControlFlow::Poll
