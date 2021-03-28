@@ -148,11 +148,6 @@ impl Default for Cpu {
 *   Fx65 = [V0, V..., Vx] = [I, I..., I + x]; I = I + x + 1
 */
 
-struct Execution {
-    ms: usize,
-    function: &'static str,
-}
-
 impl Cpu {
     /// Each subarray is a different number, from 0x0 to 0xF
     pub const FONT: [[u16; 5]; 16] = [
