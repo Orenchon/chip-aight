@@ -91,8 +91,6 @@ pub struct Cpu {
     pub store_load_quirk: bool,
     /// In some implementations x is shifted, in others, y is
     pub shift_y: bool,
-    /// Used to notify the drawing code that changes were made to the screen
-    pub drawn: bool,
 }
 
 impl Default for Cpu {
@@ -108,7 +106,6 @@ impl Default for Cpu {
             is_key_pressed_temp: None,
             store_load_quirk: false,
             shift_y: false,
-            drawn: false,
         }
     }
 }
