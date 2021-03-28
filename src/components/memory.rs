@@ -62,7 +62,7 @@ impl Memory {
     }
     /// Read the value from a memory address.
     pub fn read(&mut self, pos: u16) -> Result<u16, &'static str> {
-        let pos_u: usize = (pos * 2) as usize;
+        let pos_u: usize = (pos) as usize;
         if pos <= Memory::MAX {
             let data_head: u16 = ((self.space[pos_u]) as u16) << 8;
             let data_tail: u16 = (self.space[pos_u + 1]) as u16;
@@ -74,7 +74,7 @@ impl Memory {
     }
     /// Load a program to memory, it starts at 0x200.
     pub fn load(&mut self, program: &[u8]) -> Result<&'static str, &'static str> {
-        let pos: usize = (Memory::START * 2) as usize;
+        let pos: usize = (Memory::START) as usize;
         if program.len() <= Memory::USABLE_SPACE {
             let mut idx: usize = 0;
             while idx < program.len() {

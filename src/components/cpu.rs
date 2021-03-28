@@ -91,6 +91,8 @@ pub struct Cpu {
     pub store_load_quirk: bool,
     /// In some implementations x is shifted, in others, y is
     pub shift_y: bool,
+    /// Used to notify the drawing code that changes were made to the screen
+    pub drawn: bool,
 }
 
 impl Default for Cpu {
@@ -106,6 +108,7 @@ impl Default for Cpu {
             is_key_pressed_temp: None,
             store_load_quirk: false,
             shift_y: false,
+            drawn: false,
         }
     }
 }
@@ -190,10 +193,10 @@ impl Cpu {
         let x = ((op_code & 0xF00) >> 8) as u8;
         let y = ((op_code & 0xF0) >> 4) as u8;
         let n = (op_code & 0xF) as u8;
-
+        #[cfg(feature = "debug")]
         println!(
-            "{:x}: {:x}",
-            (self.program_counter * 2) - 0x200 * 2,
+            "<< {:04x}: {:04x} >>",
+            (self.program_counter) - 0x200,
             op_code
         );
         let result = match first_nibble {
@@ -251,17 +254,18 @@ impl Cpu {
             },
             _ => Err("first_nibble bigger than 0xF"),
         };
-        self.program_counter = self.program_counter + 1;
+        self.program_counter += 2;
         return result;
     }
     /// Used to load the fonts in the default location so that they can be used by Dxyn/draw_sprite()
     pub fn write_fonts_to_mem(mem: &mut memory::Memory) {
         for (idx, sprite) in Cpu::FONT.iter().flatten().enumerate() {
-            let res = mem.unbound_write((idx + 0x20) as u16, *sprite);
+            /*let res = mem.unbound_write((idx + 0x20) as u16, *sprite);
             match res {
                 Err(err) => panic!("{}", err),
                 _ => (),
-            }
+            }*/
+            mem.space[idx + 0x20] = (sprite >> 8) as u8;
         }
     }
     /// 0nnn - Execute machine language subroutine at nnn
@@ -288,21 +292,22 @@ impl Cpu {
     }
     /// 1nnn - Jump to nnn
     fn jump(&mut self, addr: u16) -> &'static str {
-        self.program_counter = addr - 1;
+        self.program_counter = addr - 2;
         return "1nnn";
     }
     /// 2nnn - Execute subroutine at nnn
     fn call_sub(&mut self, addr: u16) -> &'static str {
         self.stack.push(self.program_counter);
-        self.program_counter = addr - 1;
+        self.program_counter = addr - 2;
         return "2nnn";
     }
     /// 3xnn - Skip if Vx == nn - OK
     fn if_reg_equals_nn(&mut self, x: u8, nn: u8) -> &'static str {
         let vx = self.v[x as usize];
         if vx == nn {
-            self.program_counter = self.program_counter + 1
+            self.program_counter += 2
         };
+        #[cfg(feature = "debug")]
         println!("{} == {}: {}", vx, nn, vx == nn);
         return "3xnn";
     }
@@ -310,7 +315,7 @@ impl Cpu {
     fn if_not_reg_equals_nn(&mut self, x: u8, nn: u8) -> &'static str {
         let vx = self.v[x as usize];
         if vx != nn {
-            self.program_counter = self.program_counter + 1
+            self.program_counter += 2
         }
 
         return "4xnn";
@@ -318,26 +323,41 @@ impl Cpu {
     /// 5xy0 - Skip if Vx == Vy
     fn if_reg_equals_reg(&mut self, x: u8, y: u8) -> &'static str {
         if self.v[x as usize] == self.v[y as usize] {
-            self.program_counter = self.program_counter + 1
+            self.program_counter += 2
         }
+        #[cfg(feature = "debug")]
+        println!(
+            "{} == {}: {}",
+            self.v[x as usize],
+            self.v[y as usize],
+            self.v[x as usize] == self.v[y as usize]
+        );
         return "5xy0";
     }
     /// 6xnn - Vx = nn - OK
     fn reg_store_nn(&mut self, x: u8, nn: u8) -> &'static str {
         self.v[x as usize] = nn;
+        #[cfg(feature = "debug")]
         println!("V{} = {}", x, nn);
         return "6xnn";
     }
     /// 7xnn - Vx = Vx + nn; Overflows but doesn't set flag
     fn reg_add_nn(&mut self, x: u8, nn: u8) -> &'static str {
+        #[cfg(feature = "debug")]
         let old_v = self.v[x as usize];
         self.v[x as usize] = self.v[x as usize].wrapping_add(nn);
+        #[cfg(feature = "debug")]
         println!("{} + {} = {}", old_v, nn, self.v[x as usize]);
         return "7xnn";
     }
     /// 8xy0 - Vx = Vy
     fn assign_reg_to_reg(&mut self, x: u8, y: u8) -> &'static str {
         self.v[x as usize] = self.v[y as usize];
+        #[cfg(feature = "debug")]
+        println!(
+            "V{}: {} = V{}: {}",
+            x, self.v[x as usize], y, self.v[y as usize]
+        );
         return "8xy0";
     }
     /// 8xy1 - Vx = Vx | Vy
@@ -352,7 +372,14 @@ impl Cpu {
     }
     /// 8xy3 - Vx = Vx ^ Vy
     fn reg_xor_reg(&mut self, x: u8, y: u8) -> &'static str {
+        #[cfg(feature = "debug")]
+        let old_x = self.v[x as usize];
         self.v[x as usize] = self.v[x as usize] ^ self.v[y as usize];
+        #[cfg(feature = "debug")]
+        println!(
+            "{:08b} = V{}: {:08b} ^ v{}: {:08b}",
+            self.v[x as usize], x, old_x, y, self.v[y as usize]
+        );
         return "8xy3";
     }
     /// 8xy4 - Vx = Vx + Vy; VF = Carry?
@@ -401,19 +428,22 @@ impl Cpu {
     /// 9xy0 - Skip if Vx != Vy - OK
     fn if_not_reg_equals_reg(&mut self, x: u8, y: u8) -> &'static str {
         if self.v[x as usize] != self.v[y as usize] {
-            self.program_counter = self.program_counter + 1;
+            self.program_counter += 2;
         }
-        println!("{:x}, {:x}", self.v[x as usize], self.v[y as usize]);
+        #[cfg(feature = "debug")]
+        println!("{:x} != {:x}", self.v[x as usize], self.v[y as usize]);
         return "9xy0";
     }
     /// Annn - I = nnn
     fn store_addr(&mut self, nnn: u16) -> &'static str {
         self.i = nnn;
+        #[cfg(feature = "debug")]
+        println!("I = {:x}", (nnn - 0x200) * 2);
         return "Annn";
     }
     /// Bnnn - Jump to nnn + V0
     fn reg_plus_nnn_jump(&mut self, nnn: u16) -> &'static str {
-        self.program_counter = self.v[0] as u16 + nnn - 1;
+        self.program_counter = self.v[0] as u16 + nnn - 2;
         return "Bnnn";
     }
     /// Cxnn = Vx = Rand() & nn
@@ -433,10 +463,13 @@ impl Cpu {
         self.v[0xF] = 0;
         for sprite_row in 0..n {
             let row_pos = (self.v[y as usize] + sprite_row) as usize;
-            let sprite_value = (mem
-                .read(self.i + sprite_row as u16)
-                .expect("Dxyn: Failed to read memory")) as u8;
-            //println!("{}", sprite_value);
+            /*let sprite_value = (mem
+            .read(self.i + sprite_row as u16)
+            .expect("Dxyn: Failed to read memory")) as u8;
+            */
+            let sprite_value = mem.space[(self.i + sprite_row as u16) as usize];
+            #[cfg(feature = "debug")]
+            println!("{:08b}", sprite_value);
             for sprite_col in 0..8 as u8 {
                 let col_pos = (sprite_col + self.v[x as usize]) as usize;
                 let bit = (sprite_value >> (7 - sprite_col)) & 1;
@@ -447,19 +480,35 @@ impl Cpu {
                 state[col_pos % 64][row_pos % 32] = (bit ^ state_bit) > 0;
             }
         }
+        #[cfg(feature = "debug")]
+        let mut string: String = "".to_owned();
+        #[cfg(feature = "debug")]
+        let mut table: Vec<String> = Vec::new();
+        #[cfg(feature = "debug")]
+        for y in 0..32 as usize {
+            for x in 0..64 as usize {
+                string = string + &((state[x][y] as u8).to_string())[..]
+            }
+            table.push(string.clone());
+            string = "".to_owned();
+        }
+        #[cfg(feature = "debug")]
+        for row in table {
+            println!("{:?}", row);
+        }
         return "Dxyn";
     }
     /// Ex9E = Skip if key_pressed(hex(Vx)) //keypad is formed by numbers in hex
     fn if_key_pressed(&mut self, keys_pressed: &[bool; 16], x: u8) -> &'static str {
         if keys_pressed[self.v[x as usize] as usize] {
-            self.program_counter = self.program_counter + 1
+            self.program_counter += 2
         }
         return "Ex9E";
     }
     /// ExA1 = Skip if !key_pressed(hex(Vx))
     fn if_not_key_pressed(&mut self, keys_pressed: &[bool; 16], x: u8) -> &'static str {
         if !keys_pressed[self.v[x as usize] as usize] {
-            self.program_counter = self.program_counter + 1
+            self.program_counter += 2
         }
         return "ExA1";
     }
@@ -482,12 +531,12 @@ impl Cpu {
                     }
                 }
                 if !modded {
-                    self.program_counter = self.program_counter - 1
+                    self.program_counter -= 2
                 }
             }
             None => {
                 self.is_key_pressed_temp = Some(keys_pressed.clone());
-                self.program_counter = self.program_counter - 1
+                self.program_counter -= 2
             } //Store state before wait
         }
         return "Fx0A";
@@ -502,10 +551,11 @@ impl Cpu {
         self.st = self.v[x as usize];
         return "Fx18";
     }
-    /// Fx1E = I = I + Vx; Unconfirmed: VF = Carry?
+    /// Fx1E = I = I + Vx
     fn add_reg_to_i(&mut self, x: u8) -> &'static str {
         let old_i = self.i;
         self.i = self.i + self.v[x as usize] as u16;
+        #[cfg(feature = "debug")]
         println!("{} + {} = {}", old_i, self.v[x as usize], self.i);
         return "Fx1E";
     }
@@ -522,7 +572,6 @@ impl Cpu {
         let mut stack_of_digits: Vec<u8> = Vec::new();
         while number > 0 {
             stack_of_digits.push(number % 10);
-            //println!("{}", number % 10);
             number = number / 10;
         }
         while stack_of_digits.len() < 3 {
@@ -530,8 +579,9 @@ impl Cpu {
         }
         stack_of_digits.reverse();
         for (idx, digit) in stack_of_digits.iter().enumerate() {
-            mem.write(self.i + idx as u16, *digit as u16)
-                .expect("Fx33: Failed to write to memory");
+            //mem.write(self.i + idx as u16, *digit as u16)
+            //    .expect("Fx33: Failed to write to memory");
+            mem.space[self.i as usize + idx] = *digit
         }
         return "Fx33";
     }
@@ -539,12 +589,14 @@ impl Cpu {
     fn store_regs(&mut self, x: u8, mem: &mut memory::Memory) -> &'static str {
         for reg in 0..=x {
             let reg_addr = self.i + reg as u16;
-            mem.write(reg_addr, self.v[reg as usize] as u16)
-                .expect("Fx55: Failed to write to memory");
+            //mem.write(reg_addr, self.v[reg as usize] as u16)
+            //    .expect("Fx55: Failed to write to memory");
+            mem.space[reg_addr as usize] = self.v[reg as usize];
+            #[cfg(feature = "debug")]
             println!(
-                "I + {}: {:4x} = {}",
+                "I + {}: {:04x} = {}",
                 reg,
-                (self.i - 0x200 + reg as u16) * 2,
+                (self.i - 0x200 + reg as u16),
                 self.v[reg as usize]
             )
         }
@@ -557,13 +609,15 @@ impl Cpu {
     fn load_regs(&mut self, x: u8, mem: &mut memory::Memory) -> &'static str {
         for reg in 0..=x {
             let reg_addr = self.i + reg as u16;
-            self.v[reg as usize] = mem.read(reg_addr).expect("Fx65: Failed to read memory") as u8;
-            /*println!(
-                "I + {}: {:4x} = {}",
+            //self.v[reg as usize] = mem.read(reg_addr).expect("Fx65: Failed to read memory") as u8;
+            self.v[reg as usize] = mem.space[reg_addr as usize];
+            #[cfg(feature = "debug")]
+            println!(
+                "I + {}: {:04x} = {}",
                 reg,
-                (self.i - 0x200 + reg as u16) * 2,
+                (self.i - 0x200 + reg as u16),
                 self.v[reg as usize]
-            )*/
+            )
         }
         if !self.store_load_quirk {
             self.i = self.i + x as u16 + 1;
@@ -871,7 +925,7 @@ mod tests {
             };
             let x: u8 = 4;
             cpu.v[x as usize] = 10;
-            cpu.reg_shift_right(x);
+            cpu.reg_shift_right(x, 0);
             assert_eq!(cpu.v[x as usize], 5, "Register should be assigned properly");
             assert_eq!(cpu.v[0xF], 0, "Overflow should be 0");
         }
@@ -882,7 +936,7 @@ mod tests {
             };
             let x: u8 = 4;
             cpu.v[x as usize] = 5;
-            cpu.reg_shift_right(x);
+            cpu.reg_shift_right(x, 0);
             assert_eq!(cpu.v[x as usize], 2, "Register should be assigned properly");
             assert_eq!(cpu.v[0xF], 1, "Overflow should be 1");
         }
@@ -922,7 +976,7 @@ mod tests {
             };
             let x: u8 = 4;
             cpu.v[x as usize] = 0x0F;
-            cpu.reg_shift_left(x);
+            cpu.reg_shift_left(x, 0);
             assert_eq!(
                 cpu.v[x as usize], 30,
                 "Register should be assigned properly"
@@ -936,7 +990,7 @@ mod tests {
             };
             let x: u8 = 4;
             cpu.v[x as usize] = 0xF0;
-            cpu.reg_shift_left(x);
+            cpu.reg_shift_left(x, 0);
             assert_eq!(
                 cpu.v[x as usize], 224,
                 "Register should be assigned properly"
@@ -1282,11 +1336,45 @@ mod tests {
             let mut cpu = Cpu {
                 ..Default::default()
             };
+            let mut mem = Memory {
+                ..Default::default()
+            };
+            Cpu::write_fonts_to_mem(&mut mem);
             let x = 0x3;
             cpu.v[x as usize] = 1;
             cpu.i = 0;
             cpu.get_sprite_address(x);
             assert_eq!(cpu.i, 0x25, "I should be set properly to 0x25");
+            assert_eq!(
+                mem.read(cpu.i).expect("Failed to read memory"),
+                0x20,
+                "First row failed"
+            );
+            assert_eq!(
+                mem.read(cpu.i + 1).expect("Failed to read memory"),
+                0x60,
+                "Second row failed"
+            );
+            assert_eq!(
+                mem.read(cpu.i + 2).expect("Failed to read memory"),
+                0x20,
+                "Third row failed"
+            );
+            assert_eq!(
+                mem.read(cpu.i + 3).expect("Failed to read memory"),
+                0x20,
+                "Fourth row failed"
+            );
+            assert_eq!(
+                mem.read(cpu.i + 4).expect("Failed to read memory"),
+                0x70,
+                "Fifth row failed"
+            );
+            assert_eq!(
+                mem.read(cpu.i + 5).expect("Failed to read memory"),
+                0xF0,
+                "First row of next sprite failed"
+            );
             cpu.v[x as usize] = 0;
             cpu.i = 0;
             cpu.get_sprite_address(x);

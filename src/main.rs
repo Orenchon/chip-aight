@@ -1,7 +1,7 @@
 mod components;
-use components::cpu::Cpu;
 use components::memory::Memory;
 use components::sound::SoundManager;
+use components::{cpu::Cpu, sound};
 use getopts::Options;
 use pixels::{Error, Pixels, SurfaceTexture};
 use std::env;
@@ -82,6 +82,7 @@ fn main() {
     };
 
     let one_cycle_time: u128 = 1000000 / hz;
+    //let one_cycle_time: u128 = 1000000;
     let filename = if !matches.free.is_empty() {
         matches.free[0].clone()
     } else {
@@ -167,7 +168,10 @@ fn main() {
                     if keep_trying {
                         let result = cpu.run_cycle(&mut mem, &mut state, &is_key_pressed);
                         match result {
-                            Err(_) => keep_trying = false,
+                            Err(_) => {
+                                keep_trying = false;
+                                println!("{:?}", cpu.v)
+                            }
                             _ => (),
                         }
                     }
@@ -175,15 +179,18 @@ fn main() {
                 }
                 last_cpu = Instant::now();
             }
-            if last_draw.elapsed().as_millis() > 16 {
+            if last_draw.elapsed().as_millis() > 16 && cpu.drawn {
                 window.request_redraw();
                 last_draw = Instant::now();
                 if cpu.dt > 0 {
                     cpu.dt = cpu.dt - 1
                 };
                 if cpu.st > 0 {
+                    sound_system.play();
                     cpu.st = cpu.st - 1
-                };
+                } else {
+                    sound_system.pause();
+                }
             }
 
             *control_flow = ControlFlow::Poll
