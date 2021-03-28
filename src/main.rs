@@ -179,7 +179,7 @@ fn main() {
                 }
                 last_cpu = Instant::now();
             }
-            if last_draw.elapsed().as_millis() > 16 && cpu.drawn {
+            if last_draw.elapsed().as_millis() > 16 {
                 window.request_redraw();
                 last_draw = Instant::now();
                 if cpu.dt > 0 {
