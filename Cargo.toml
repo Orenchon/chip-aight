@@ -11,3 +11,7 @@ pixels = "*"
 winit = "*"
 rand = "*"
 kira = "*"
+getopts = "*"
+
+[features]
+debug = []
